@@ -10,7 +10,7 @@ Một Host đăng nhập, tạo room duy nhất, cho người chơi đăng nhậ
 
 | Mốc | Công việc | Đầu ra bắt buộc | Có thể bắt đầu song song sau mốc |
 |---|---|---|---|
-| M0 — Contracts | Chuyển `contracts.md` thành Zod schemas/types ở `src/contracts/`; viết fixtures seed, room, round, projections, command, lỗi; chốt API examples và kiểm tra liên kết với đặc tả gốc. | `pnpm test:contracts` qua; contract v1 được các nhánh cùng dùng. | M1a–M1d |
+| M0 — Contracts | Chuyển `contracts.md` thành Zod schemas/types ở `src/contracts/`; viết fixtures seed, room, round, projections, command, lỗi; chốt API examples và kiểm tra liên kết với đặc tả gốc. | `npm run test:contracts` qua; contract v1 được các nhánh cùng dùng. | M1a–M1d |
 | M1a — Game engine | Máy trạng thái, phân số chính xác, scoring, Nash, rule registry, elimination/seed, team ranking; hàm thuần không I/O. | Test bảng tình huống ở §7 contracts. | M2 integration |
 | M1b — Store | Memory + JSON snapshot dev, Upstash Redis adapter, atomic commands, archive TTL 7 ngày, version. | Chung một bộ contract tests cho hai adapter; thử 50 pick đồng thời. | M2 integration |
 | M1c — UI Player/Host | Login, lobby, pick, host controls, reset/export, session restore, English strings; dùng fixture/API mock theo contracts. | Story/UI flow ở mobile và desktop; không phụ thuộc store thật. | M2 integration |
@@ -35,7 +35,7 @@ M1a–M1d là bốn luồng triển khai độc lập **sau** khi M0 được me
 
 ### M0 — Khóa contract
 
-1. Tạo Next.js App Router + TypeScript + Tailwind + pnpm + Vitest. Chọn một Node runtime phù hợp Vercel.
+1. Dùng scaffold Next.js App Router + TypeScript + Tailwind 4 + npm + Vitest đã có trên `main`; điều chỉnh các type/store sơ khai theo contract v1 trước khi chia nhánh.
 2. Tạo `db/teams.json` và `db/users.json` từ dữ liệu thật do Host điền; commit ví dụ không chứa dữ liệu thật nếu chưa có roster. Runtime chỉ đọc seed ở server.
 3. Khai báo schema `TeamSeed`, `UserSeed`, `RoomState`, `Round`, `RoundResult`, `Command`, `Projection`, `ApiError`; cố định JSON examples và version `v1`.
 4. Quyết định bảng lỗi HTTP cụ thể: 400 schema, 401 chưa xác thực, 403 sai quyền, 404 room/run, 409 trạng thái/version, 429 rate limit.
@@ -65,7 +65,7 @@ M1a–M1d là bốn luồng triển khai độc lập **sau** khi M0 được me
 1. Tích hợp API/auth/projections; test bằng request thật để chắc chắn Portal/Player không nhận pick người khác trước reveal, Host không thấy pick trước lock.
 2. E2E: Host tạo room; ít nhất 3 Player thuộc nhiều đội; vòng thường → Nash → Rule 1 → Rule 2 → winner/elimination → finish → export → reset → archive export.
 3. Chạy test tải 50 client polling mỗi giây và gửi gần đồng thời. Kiểm tra không mất pick, không nhân đôi lệnh, Portal đạt mục tiêu cập nhật trong 2 giây ở môi trường Vercel mục tiêu.
-4. Kiểm tra `pnpm lint`, `pnpm test`, `pnpm build`, khởi động lại dev server, reconnect Player/Portal, và deploy Vercel với Redis. Ghi kết quả đo thực tế và giới hạn vào README.
+4. Kiểm tra `npm run lint`, `npm test`, `npm run typecheck`, `npm run build`, khởi động lại dev server, reconnect Player/Portal, và deploy Vercel với Redis. Ghi kết quả đo thực tế và giới hạn vào README.
 
 ## Rủi ro cần xử lý ở đúng mốc
 

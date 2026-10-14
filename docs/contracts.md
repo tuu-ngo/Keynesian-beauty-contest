@@ -196,7 +196,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 - Host cookie dùng `HttpOnly`, `Secure` ở production, `SameSite=Strict`; API ghi kiểm tra `Origin`. Login Host/Player và pick có rate limit cơ bản.
 - `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,username,displayName,teamId,pick,distance,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có password/token. Archive chỉ Host xem và xuất.
 
-Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `STORE=memory|redis`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `STORE=memory`; production bắt buộc `redis`. Không đưa biến secret vào `NEXT_PUBLIC_*`.
+Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `STORE=memory|upstash`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `STORE=memory`; production bắt buộc `upstash`. Không đưa biến secret vào `NEXT_PUBLIC_*`.
 
 ## 6. Store và độ bền dữ liệu
 

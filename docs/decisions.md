@@ -28,3 +28,8 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 - Host dùng cookie phiên `HttpOnly` được ký bằng secret môi trường; Player dùng token ngẫu nhiên để khôi phục phiên. Mật khẩu và token không xuất hiện trong projection của Portal.
 
 Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](contracts.md). Thứ tự thực hiện ở [`mvp-plan.md`](mvp-plan.md).
+
+## Quyết định từ scaffold trên main
+
+- Dự án dùng `npm` và `package-lock.json` vì máy dev chưa có pnpm. Scripts hiện có: `dev`, `build`, `lint`, `test`, `typecheck`.
+- Tailwind CSS 4 dùng `@tailwindcss/postcss` và `@import "tailwindcss"` trong `src/app/globals.css`; không có `tailwind.config`.

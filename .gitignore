@@ -1,2 +1,11 @@
+node_modules
+.next
+out
+coverage
+.env*
+!.env.example
+.vercel
+*.tsbuildinfo
+next-env.d.ts
 .tmp
-.env
+db/state.dev.json

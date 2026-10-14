@@ -180,7 +180,7 @@ Tính toán từ dữ liệu đã lưu:
 - **Next.js (App Router) + TypeScript**, triển khai trên **Vercel**. Tailwind CSS để tạo kiểu. Biểu đồ dùng thư viện nhẹ (ví dụ Recharts hoặc visx) hoặc SVG tự viết — hiệu ứng công bố phải là SVG/CSS (ví dụ Framer Motion), không phải ảnh chụp canvas.
 - **Kho trạng thái: Upstash Redis** qua Vercel Marketplace. Các Function là stateless nên cần kho dùng chung, kể cả khi dùng WebSocket. Vercel KV cũ không còn được cung cấp cho dự án mới. Duy trì một interface `Store` mỏng (`getGame`, `mutateGame`, …) để có thể thay backend (ví dụ Supabase) mà không chạm vào logic trò chơi.
 - Logic trò chơi thuần (máy trạng thái, tính điểm, các bin cấp độ-k) nằm trong `src/lib/game/` và **không** import framework hay I/O để có thể kiểm thử đơn vị hoàn toàn.
-- Node ≥ 20, `pnpm`.
+- Node ≥ 20, `npm`.
 
 ### 4.2 Phương thức truyền tải thời gian thực
 MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ WebSocket ở Public Beta, nhưng mỗi kết nối vẫn bị giới hạn theo thời lượng Function và cần kho trạng thái chung. Vì vậy:
@@ -251,7 +251,7 @@ NEXT_PUBLIC_BASE_URL=        # dùng cho link tham gia và mã QR
 ```
 - Môi trường dev cục bộ phải chạy được **không cần dịch vụ bên ngoài** bằng store trong bộ nhớ (`STORE=memory`).
 - Triển khai: push lên GitHub, import repo vào Vercel, gắn tích hợp Upstash Redis, thiết lập biến môi trường. Không có secret lúc build ngoài các biến ở trên.
-- Thêm các script `pnpm dev`, `pnpm test`, `pnpm lint`, `pnpm build`.
+- Thêm các script `npm run dev`, `npm test`, `npm run lint`, `npm run build`.
 
 ## 7. Tiêu chí nghiệm thu
 1. Người dẫn tạo trò chơi, một trình duyệt thứ hai (Portal) và ≥ 3 điện thoại mô phỏng tham gia; sảnh hiển thị tên trực tiếp trên Portal trong vòng 2 giây.
@@ -261,7 +261,7 @@ NEXT_PUBLIC_BASE_URL=        # dùng cho link tham gia và mã QR
 4. Đóng và mở lại tab Player hoặc Host khôi phục phiên; Portal vẫn hoạt động sau 30 giây offline và đồng bộ lại.
 5. 200 người chơi mô phỏng (script trong `tests/load/`) hoàn thành một vòng với độ trễ polling trạng thái p95 < 500 ms.
 6. Màn hình chung cuộc hiển thị bảng xếp hạng, biểu đồ hội tụ và phần tổng kết cấp độ-k.
-7. `pnpm build` chạy thành công và ứng dụng chạy trên Vercel với Upstash; `STORE=memory pnpm dev` chạy offline.
+7. `npm run build` chạy thành công và ứng dụng chạy trên Vercel với Upstash; `STORE=memory npm run dev` chạy offline.
 
 ## 8. Ngoài phạm vi (v1)
 Tài khoản và hồ sơ cố định, thanh toán, nhiều người dẫn/đồng dẫn, video/thoại, dashboard kiểm duyệt, ứng dụng native, lịch sử trò chơi dài hạn ngoài thời hạn 24 giờ.
