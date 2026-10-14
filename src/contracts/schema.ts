@@ -1,0 +1,174 @@
+import { z } from "zod";
+
+/** The versioned boundary shared by route handlers and the server model. */
+export const SCHEMA_VERSION = 1 as const;
+
+export const phaseSchema = z.enum(["NORMAL", "ESCALATION"]);
+export const statusSchema = z.enum(["LOBBY", "ROUND_OPEN", "ROUND_LOCKED", "ROUND_REVEALED", "FINISHED"]);
+export const participantStatusSchema = z.enum(["ACTIVE", "ELIMINATED"]);
+export const pSchema = z.enum(["0.8", "2/3", "1/2"]);
+export const ruleIdSchema = z.union([z.literal(1), z.literal(2)]);
+export const roomCodeSchema = z.string().regex(/^[A-Z]{4}$/, "Code must contain four uppercase letters.");
+export const uuidSchema = z.string().uuid();
+
+export const teamSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(80),
+  image: z.string().regex(/^\/teams\//).optional(),
+  color: z.string().max(64).optional(),
+}).strict();
+
+export const accountSchema = z.object({
+  username: z.string().trim().toLowerCase().min(1).max(64),
+  displayName: z.string().trim().min(1).max(64),
+  teamId: z.string().trim().min(1).max(64),
+}).strict();
+
+export const participantSchema = accountSchema.extend({
+  joinedAt: z.string().datetime(),
+  status: participantStatusSchema,
+  eliminatedInRound: z.number().int().positive().nullable(),
+  totalPoints: z.number().int().nonnegative(),
+}).strict();
+
+export const roundSettingsSchema = z.object({
+  p: pSchema,
+  min: z.literal(0),
+  max: z.literal(100),
+  step: z.literal(0.1),
+  timerSeconds: z.number().int().min(5).max(60 * 60).nullable(),
+}).strict();
+
+export const roundResultSchema = z.object({
+  average: z.string().nullable(),
+  target: z.string().nullable(),
+  winners: z.array(z.string()),
+  eliminatedUsername: z.string().nullable(),
+  eliminationSeed: z.string().nullable(),
+  eliminationCandidates: z.array(z.string()),
+  pointsByUsername: z.record(z.number().int().nonnegative()),
+}).strict();
+
+export const roundSchema = z.object({
+  number: z.number().int().positive(),
+  settings: roundSettingsSchema,
+  openedAt: z.string().datetime(),
+  deadlineAt: z.string().datetime().nullable(),
+  lockedAt: z.string().datetime().nullable(),
+  revealedAt: z.string().datetime().nullable(),
+  result: roundResultSchema.nullable(),
+}).strict();
+
+export const publicPlayerSchema = z.object({
+  username: z.string(),
+  displayName: z.string(),
+  teamId: z.string(),
+  hasSubmitted: z.boolean(),
+  status: participantStatusSchema,
+  eliminatedInRound: z.number().int().positive().nullable(),
+  totalPoints: z.number().int().nonnegative(),
+  finalPlacement: z.number().int().positive().nullable(),
+}).strict();
+
+export const revealedRoundSchema = z.object({
+  number: z.number().int().positive(),
+  settings: roundSettingsSchema,
+  average: z.string().nullable(),
+  target: z.string().nullable(),
+  picks: z.array(z.object({ valueTenths: z.number().int().min(0).max(1000) }).strict()),
+  winners: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), points: z.number().int().nonnegative() }).strict()),
+  eliminatedUsername: z.string().nullable(),
+}).strict();
+
+export const leaderboardRowSchema = z.object({
+  username: z.string(),
+  rank: z.number().int().positive(),
+  points: z.number().int().nonnegative(),
+}).strict();
+
+export const teamLeaderboardRowSchema = z.object({
+  teamId: z.string(),
+  rank: z.number().int().positive(),
+  points: z.number().int().nonnegative(),
+}).strict();
+
+export const publicProjectionSchema = z.object({
+  schemaVersion: z.literal(SCHEMA_VERSION),
+  view: z.literal("public"),
+  code: roomCodeSchema,
+  runId: uuidSchema,
+  runNumber: z.number().int().positive(),
+  version: z.number().int().nonnegative(),
+  serverNow: z.string().datetime(),
+  status: statusSchema,
+  phase: phaseSchema,
+  escalationReason: z.enum(["NASH", "HOST"]).nullable(),
+  activeRules: z.array(ruleIdSchema),
+  teams: z.array(teamSchema),
+  players: z.array(publicPlayerSchema),
+  currentRound: z.object({ number: z.number().int().positive(), settings: roundSettingsSchema, deadlineAt: z.string().datetime().nullable() }).strict().nullable(),
+  nextRoundSettings: roundSettingsSchema,
+  submittedCount: z.number().int().nonnegative(),
+  activeCount: z.number().int().nonnegative(),
+  revealedRounds: z.array(revealedRoundSchema),
+  individualLeaderboard: z.array(leaderboardRowSchema),
+  teamLeaderboard: z.array(teamLeaderboardRowSchema),
+}).strict();
+
+export const playerProjectionSchema = publicProjectionSchema.extend({
+  view: z.literal("player"),
+  self: z.object({
+    username: z.string(),
+    currentPickTenths: z.number().int().min(0).max(1000).nullable(),
+    totalPoints: z.number().int().nonnegative(),
+    status: participantStatusSchema,
+    eliminatedInRound: z.number().int().positive().nullable(),
+  }).strict(),
+}).strict();
+
+export const hostProjectionSchema = publicProjectionSchema.extend({
+  view: z.literal("host"),
+  hostPicks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000) }).strict()).nullable(),
+}).strict();
+
+export const stateResponseSchema = z.discriminatedUnion("view", [publicProjectionSchema, playerProjectionSchema, hostProjectionSchema]);
+
+export const hostCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("OPEN_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("LOCK_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("REVEAL_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("START_ESCALATION"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("FINISH"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("RESET"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({
+    type: z.literal("UPDATE_SETTINGS"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative(),
+    payload: z.object({ p: pSchema.optional(), timerSeconds: z.number().int().min(5).max(60 * 60).nullable().optional() }).strict(),
+  }).strict(),
+]);
+
+export const playerLoginSchema = z.object({
+  code: roomCodeSchema,
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(1).max(512),
+}).strict();
+
+export const joinSchema = z.object({ runId: uuidSchema }).strict();
+export const pickSchema = z.object({
+  runId: uuidSchema,
+  round: z.number().int().positive(),
+  value: z.number().finite().min(0).max(100),
+  requestId: uuidSchema,
+}).strict();
+
+export type Team = z.infer<typeof teamSchema>;
+export type Account = z.infer<typeof accountSchema>;
+export type Participant = z.infer<typeof participantSchema>;
+export type RoundSettings = z.infer<typeof roundSettingsSchema>;
+export type RoundResult = z.infer<typeof roundResultSchema>;
+export type Round = z.infer<typeof roundSchema>;
+export type RevealedRound = z.infer<typeof revealedRoundSchema>;
+export type HostCommand = z.infer<typeof hostCommandSchema>;
+export type StateResponse = z.infer<typeof stateResponseSchema>;
+export type PublicProjection = Extract<StateResponse, { view: "public" }>;
+export type PlayerProjection = Extract<StateResponse, { view: "player" }>;
+export type HostProjection = Extract<StateResponse, { view: "host" }>;

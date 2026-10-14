@@ -1,17 +1,13 @@
-import { MemoryStore } from "./memory";
-import type { Store } from "./types";
+import { LibsqlStore } from "./libsql";
+import type { RoomStore } from "./room-types";
 
-export type { Store } from "./types";
+export type { RoomStore, SeedRoster } from "./room-types";
 
-const globalForStore = globalThis as unknown as { __store?: Store };
+const globalForStore = globalThis as unknown as { __store?: LibsqlStore };
 
-/**
- * STORE=memory (default in dev) or STORE=upstash.
- * TODO: add the Upstash implementation (src/lib/store/upstash.ts) and select it here.
- */
-export function getStore(): Store {
+export function getRoomStore(): RoomStore {
   if (!globalForStore.__store) {
-    globalForStore.__store = new MemoryStore();
+    globalForStore.__store = new LibsqlStore();
   }
   return globalForStore.__store;
 }
