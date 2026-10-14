@@ -1,270 +1,270 @@
-# Keynesian Beauty Contest — Live Game Host
+# Keynesian Beauty Contest — Máy chủ trò chơi trực tiếp
 
-A web app to run the **Keynesian beauty contest** (the "guess 80% of the average" game; the classic version uses 2/3) live with a group. Players join from their phones via a link; the host projects a **portal** on a big screen so the whole room watches the game unfold. Hosted on **Vercel**.
+Ứng dụng web để tổ chức **trò chơi cuộc thi sắc đẹp Keynes** (trò chơi “đoán 80% giá trị trung bình”; phiên bản kinh điển sử dụng 2/3) trực tiếp với một nhóm người. Người chơi tham gia bằng điện thoại qua một đường link; người dẫn chiếu một **cổng hiển thị** trên màn hình lớn để cả phòng cùng theo dõi diễn biến trò chơi. Ứng dụng được lưu trữ trên **Vercel**.
 
-This README is the product and technical specification. Build exactly what it describes; where something is unspecified, choose the simplest option that satisfies the requirements and note the decision in `docs/decisions.md`.
+README này là đặc tả sản phẩm và kỹ thuật gốc. **Phạm vi MVP đã được chốt lại** trong [`decisions.md`](docs/decisions.md), [`contracts.md`](docs/contracts.md) và [`mvp-plan.md`](docs/mvp-plan.md). Khi tài liệu gốc khác các quyết định MVP, dùng ba tài liệu này để triển khai MVP; các phần còn lại là định hướng sau MVP.
 
 ---
 
-## 1. The game
+## 1. Trò chơi
 
-### Background
-John Maynard Keynes (*General Theory*, 1936, ch. 12) compared stock picking to a newspaper contest in which entrants choose the 6 prettiest faces out of 100 photos, and win by picking the faces *most others* pick. Level-1 players choose what they find prettiest; level-2 players choose what they think the average person finds prettiest; level-3 players guess what the average person thinks the average person thinks, and so on.
+### Bối cảnh
+John Maynard Keynes (*General Theory*, 1936, chương 12) so sánh việc chọn cổ phiếu với một cuộc thi trên báo, trong đó người tham gia chọn 6 gương mặt đẹp nhất trong 100 bức ảnh và chiến thắng bằng cách chọn những gương mặt được *nhiều người khác* chọn nhất. Người chơi cấp độ 1 chọn điều họ thấy đẹp nhất; người chơi cấp độ 2 chọn điều họ nghĩ người trung bình thấy đẹp nhất; người chơi cấp độ 3 đoán điều mà họ nghĩ người trung bình nghĩ người trung bình nghĩ là đẹp nhất, và cứ thế tiếp tục.
 
-The standard lab/classroom version is the **p-beauty contest** (Nagel 1995):
+Phiên bản tiêu chuẩn trong phòng thí nghiệm/lớp học là **cuộc thi vẻ đẹp p** (Nagel 1995):
 
-1. Every player secretly picks a number in `[0, 100]`.
-2. The average of all picks is computed.
-3. The **target** is `p × average` (default `p = 0.8`, i.e. **80% of the average**; the textbook version uses `p = 2/3`).
-4. The player whose pick is **closest to the target** wins the round.
+1. Mỗi người chơi bí mật chọn một số trong `[0, 100]`.
+2. Tính giá trị trung bình của tất cả lựa chọn.
+3. **Mục tiêu** là `p × average` (mặc định `p = 0.8`, tức **80% giá trị trung bình**; phiên bản trong sách sử dụng `p = 2/3`).
+4. Người chơi có lựa chọn **gần mục tiêu nhất** sẽ thắng vòng.
 
-### Theory (shown to the audience in the debrief)
-- If everyone picks uniformly at random, average ≈ 50, so target ≈ 40 (`0.8 × 50`). A "level-1" player picks ~40.
-- A "level-2" player expects others to pick 40 and picks ~32; level-3 picks ~25.6; level-4 ~20.5; and so on (`50 · 0.8ᵏ`). Convergence is slower than with `p = 2/3` (where the steps are 33, 22, 15…), so more rounds are useful.
-- Iterating forever converges to **0**, the unique Nash equilibrium (for real-valued picks).
-- Real groups do not play 0. Typical first-round results for the classic `p = 2/3` game: picks cluster near **33** and **22**, with spikes at 50 and 0/1; averages roughly 25–40 depending on the crowd (e.g. reported ≈ 40 for general business audiences, ≈ 25–30 for economics PhDs / Caltech undergraduates). These figures are for `p = 2/3`; with `p = 0.8` expect clusters near **40** and **32** and a higher average.
-- With repeated rounds, averages fall toward 0 as players learn.
+### Lý thuyết (hiển thị cho khán giả trong phần tổng kết)
+- Nếu mọi người chọn ngẫu nhiên theo phân phối đều, giá trị trung bình ≈ 50, nên mục tiêu ≈ 40 (`0.8 × 50`). Người chơi “cấp độ 1” chọn khoảng 40.
+- Người chơi “cấp độ 2” dự đoán những người khác sẽ chọn 40 và chọn khoảng 32; cấp độ 3 chọn khoảng 25,6; cấp độ 4 khoảng 20,5; v.v. (`50 · 0.8ᵏ`). Với `p = 2/3`, dãy cấp độ-k tiến về 0 nhanh hơn (các bước là 33, 22, 15…).
+- Lặp vô hạn sẽ hội tụ về **0**, cân bằng Nash duy nhất (đối với lựa chọn giá trị thực).
+- Các nhóm thực tế không chơi 0. Kết quả vòng đầu điển hình của trò chơi kinh điển với `p = 2/3`: các lựa chọn tập trung gần **33** và **22**, cùng các đỉnh tại 50 và 0/1; giá trị trung bình khoảng 25–40 tùy nhóm (ví dụ khoảng ≈ 40 ở khán giả kinh doanh nói chung, ≈ 25–30 ở nghiên cứu sinh kinh tế / sinh viên Caltech). Các con số này dành cho `p = 2/3`; với `p = 0.8`, hãy kỳ vọng các cụm gần **40** và **32** cùng giá trị trung bình cao hơn.
+- Qua nhiều vòng, giá trị trung bình giảm dần về 0 khi người chơi học hỏi.
 
-### Escalation phase (elimination rules)
-The game has two phases.
+### Giai đoạn leo thang (quy tắc loại người chơi)
+Trò chơi có hai giai đoạn.
 
-**Phase A — Normal.** The base rules above. Everyone plays every round. No eliminations.
+**Giai đoạn A — Bình thường.** Áp dụng các quy tắc cơ bản ở trên. Mọi người chơi mọi vòng. Không có loại người chơi.
 
-**Phase B — Escalation.** Starts when the room reaches the **Nash equilibrium**, and from then on the game gets harsher: players are eliminated one by one and each step adds a new rule.
+**Giai đoạn B — Leo thang.** Bắt đầu khi phòng chơi đạt **cân bằng Nash**, từ đó trò chơi trở nên khắc nghiệt hơn: người chơi bị loại từng người một và mỗi bước bổ sung một quy tắc mới.
 
-- **Nash trigger.** After a round is revealed, if **every active player submitted exactly the range minimum (`0` by default)**, the equilibrium is reached. (Needs ≥ 2 active players. Phase B never ends once started; it is irreversible for that game.)
-- **At the trigger:** announce "Nash equilibrium reached" and activate **Rule 1**. Phase B begins with the **next** round.
-- **Every round in Phase B eliminates exactly one player** (see "Who is eliminated" below). **After each elimination, the next rule in the rule list is activated** (the first elimination activates **Rule 2**). Rules stay active once added (they accumulate).
-- The game ends when **one active player remains** (the winner) or the host ends it. Eliminated players become spectators: they keep seeing the Portal-style view, cannot submit, and are ranked by elimination order (later out = higher rank).
+- **Điều kiện kích hoạt Nash.** Sau khi công bố kết quả một vòng, nếu **mọi người chơi đang hoạt động đều gửi chính xác giá trị nhỏ nhất của miền (`0` theo mặc định)**, cân bằng đã đạt được. (Cần ít nhất 2 người chơi đang hoạt động. Giai đoạn B không kết thúc sau khi bắt đầu; trạng thái này không thể đảo ngược trong trò chơi đó.)
+- **Tại thời điểm kích hoạt:** thông báo “Đã đạt cân bằng Nash” và kích hoạt **Quy tắc 1**. Giai đoạn B bắt đầu từ vòng **tiếp theo**.
+- **Mỗi vòng trong Giai đoạn B loại chính xác một người chơi** (xem “Ai bị loại” bên dưới). **Sau mỗi lần loại**, quy tắc tiếp theo trong danh sách được kích hoạt (lần loại đầu tiên kích hoạt **Quy tắc 2**). Các quy tắc đã kích hoạt vẫn tiếp tục có hiệu lực và được tích lũy.
+- Trò chơi kết thúc khi còn **một người chơi đang hoạt động** (người thắng) hoặc khi người dẫn kết thúc. Người chơi bị loại trở thành khán giả: họ tiếp tục thấy chế độ hiển thị kiểu Portal, không thể gửi lựa chọn, và được xếp hạng theo thứ tự bị loại (bị loại sau có thứ hạng cao hơn).
 
-**Rule list** (ordered, extensible; v1 ships these two):
+**Danh sách quy tắc** (có thứ tự, có thể mở rộng; v1 cung cấp hai quy tắc này):
 
-| # | Rule | Effect |
-|---|------|--------|
-| 1 | **No duplicates** | Any value picked by **2 or more** players: all of those players **automatically lose the round** (cannot win it). Players whose pick is **unique** are eligible; the winner is the eligible player closest to the target. Duplicate picks **still count** in the average. |
-| 2 | **Zero is beaten by 100** | If at least one player picked `0` **and** at least one picked `100` (range minimum / maximum), the player who picked `100` **definitely wins** the round, regardless of distance to the target. If several players picked `100` and Rule 1 is active, they are duplicates and lose, so this rule gives no winner and the round falls back to Rule 1 / base scoring. |
+| # | Quy tắc | Tác động |
+|---|--------|---------|
+| 1 | **Không trùng lặp** | Bất kỳ giá trị nào được **từ 2 người chơi trở lên** chọn: tất cả những người chơi đó **tự động thua vòng** (không thể thắng vòng). Những người có lựa chọn duy nhất đủ điều kiện; người thắng là người đủ điều kiện gần mục tiêu nhất. Các lựa chọn trùng nhau **vẫn được tính** vào giá trị trung bình. |
+| 2 | **100 đánh bại 0** | Nếu có ít nhất một người chơi chọn `0` **và** ít nhất một người chọn `100` (giá trị nhỏ nhất / lớn nhất của miền), người chọn `100` **chắc chắn thắng** vòng, bất kể khoảng cách tới mục tiêu. Nếu nhiều người chơi chọn `100` và Quy tắc 1 đang hoạt động, họ bị xem là trùng lặp và thua, nên quy tắc này không tạo ra người thắng và vòng sẽ quay về Quy tắc 1 / cách tính cơ bản. |
 
-**Precedence when rules overlap:** Rule 2 outcome → Rule 1 filtering → base "closest to target". A rule never overrides one with a higher precedence.
+**Độ ưu tiên khi các quy tắc chồng lấn:** kết quả Quy tắc 2 → lọc theo Quy tắc 1 → “gần mục tiêu nhất” cơ bản. Một quy tắc không bao giờ ghi đè quy tắc có độ ưu tiên cao hơn.
 
-**Who is eliminated** (one per Phase B round, never a winner of that round). Candidates are ordered worst-first by tiers:
-1. Active players who did **not submit**.
-2. Players who lost automatically through Rule 1 (duplicates), if Rule 1 is active.
-3. All other non-winners.
+**Ai bị loại** (mỗi vòng Giai đoạn B một người, không bao giờ là người thắng vòng đó). Các ứng viên được xếp theo các nhóm từ tệ nhất đến tốt nhất:
+1. Người chơi đang hoạt động **không gửi lựa chọn**.
+2. Người chơi tự động thua do Quy tắc 1 (trùng lặp), nếu Quy tắc 1 đang hoạt động.
+3. Tất cả những người chơi không thắng còn lại.
 
-Within a tier, the player with the **largest distance to the target** is eliminated. If still tied, pick **randomly with a stored seed**, and record the seed and the candidates in the round history so the outcome is auditable. Exactly one player is eliminated per round.
+Trong mỗi nhóm, người chơi có **khoảng cách lớn nhất tới mục tiêu** bị loại. Nếu vẫn hòa, chọn **ngẫu nhiên bằng một seed được lưu trữ**, đồng thời ghi seed và danh sách ứng viên vào lịch sử vòng để có thể kiểm tra kết quả. Mỗi vòng loại chính xác một người chơi.
 
-### Sources
+### Nguồn tham khảo
 - Wikipedia: <https://en.wikipedia.org/wiki/Keynesian_beauty_contest>
-- Nagel (1995), "Unraveling in Guessing Games: An Experimental Study", *American Economic Review*.
-- Classroom protocol: <https://en.wikiversity.org/wiki/Economic_Classroom_Experiments/Guessing_Game>
-- Lecture notes with the Nagel histogram: <https://cs.brown.edu/courses/csci1440/lectures/2025/beauty_contest.pdf>
+- Nagel (1995), “Unraveling in Guessing Games: An Experimental Study”, *American Economic Review*.
+- Quy trình lớp học: <https://en.wikiversity.org/wiki/Economic_Classroom_Experiments/Guessing_Game>
+- Bài giảng có biểu đồ Nagel: <https://cs.brown.edu/courses/csci1440/lectures/2025/beauty_contest.pdf>
 
 ---
 
-## 2. Roles and screens
+## 2. Vai trò và màn hình
 
-| Role | Device | URL | Purpose |
+| Vai trò | Thiết bị | URL | Mục đích |
 |------|--------|-----|---------|
-| **Player** | Phone (portrait) | `/` and `/play/[code]` | Join a game, submit a number, see own result |
-| **Host** | Laptop | `/host/[code]` | Create the game, control rounds, see all data |
-| **Portal** | Projector / big screen (16:9, 1920×1080) | `/portal/[code]` | Read-only spectator view of the live game |
+| **Người chơi** | Điện thoại (dọc) | `/` và `/play/[code]` | Tham gia trò chơi, gửi một số, xem kết quả của mình |
+| **Người dẫn** | Laptop | `/host/[code]` | Tạo trò chơi, điều khiển các vòng, xem toàn bộ dữ liệu |
+| **Portal** | Máy chiếu / màn hình lớn (16:9, 1920×1080) | `/portal/[code]` | Màn hình khán giả chỉ đọc của trò chơi trực tiếp |
 
-The host opens the Portal in a second browser window and projects it. Host controls and the Portal are **separate pages**: the Portal must never show controls or anything the audience should not see (e.g. individual picks during the submission phase).
+Người dẫn mở Portal trong một cửa sổ trình duyệt thứ hai và chiếu nó. Các điều khiển của người dẫn và Portal là **những trang riêng biệt**: Portal tuyệt đối không được hiển thị điều khiển hoặc bất kỳ thông tin nào khán giả không nên thấy (ví dụ: lựa chọn riêng lẻ trong giai đoạn gửi lựa chọn).
 
-### 2.1 Player flow
-1. Open the shared link (`/` or `/play/ABCD`). Enter the **game code** (4 uppercase letters) and a **display name** (max 20 chars, unique within the game; duplicates get rejected with a clear message).
-2. Wait in lobby ("Waiting for host…").
-3. When a round opens: see the rules reminder, a number input (slider + numeric field, `0–100`, step `0.1` by default, configurable), a **Submit** button, and a countdown if a timer is set. Submit is final unless the host enables "allow change until lock" (default: allowed until the round locks).
-4. After submission: "Locked in ✓ — waiting for others". Show how many have submitted (count only).
-5. After reveal: show own pick, the average, the target, the winner(s), own rank and distance to target.
-6. Between rounds: cumulative score and leaderboard position.
-7. In `ESCALATION`: the active rules are shown above the input at all times. If the player is eliminated they see an "Eliminated in round N" screen and become a spectator (no input).
+### 2.1 Luồng người chơi
+1. Mở đường link được chia sẻ (`/` hoặc `/play/ABCD`). Nhập **mã trò chơi** (4 chữ cái viết hoa) và **tên hiển thị** (tối đa 20 ký tự, duy nhất trong trò chơi; tên trùng bị từ chối kèm thông báo rõ ràng).
+2. Chờ trong sảnh (“Đang chờ người dẫn…”).
+3. Khi một vòng mở: xem lời nhắc quy tắc, ô nhập số (thanh trượt + trường số, `0–100`, bước mặc định `0.1`, có thể cấu hình), nút **Gửi** và bộ đếm ngược nếu đã đặt hẹn giờ. Lựa chọn đã gửi là lựa chọn cuối cùng, trừ khi người dẫn bật “cho phép thay đổi cho đến khi khóa” (mặc định: được phép thay đổi cho đến khi vòng bị khóa).
+4. Sau khi gửi: “Đã khóa ✓ — đang chờ những người khác”. Hiển thị số người đã gửi (chỉ hiển thị số lượng).
+5. Sau khi công bố: hiển thị lựa chọn của mình, giá trị trung bình, mục tiêu, người thắng, thứ hạng và khoảng cách tới mục tiêu của mình.
+6. Giữa các vòng: điểm tích lũy và vị trí trên bảng xếp hạng.
+7. Trong `ESCALATION`: các quy tắc đang hoạt động luôn được hiển thị phía trên ô nhập. Nếu bị loại, người chơi thấy màn hình “Bị loại ở vòng N” và trở thành khán giả (không còn ô nhập).
 
-Players can rejoin after closing the tab (session token stored in `localStorage`, tied to the display name). A player who loses connection must not lose their submitted pick.
+Người chơi có thể tham gia lại sau khi đóng tab (token phiên được lưu trong `localStorage`, gắn với tên hiển thị). Người chơi mất kết nối không được mất lựa chọn đã gửi.
 
-### 2.2 Host flow
-1. **Create game**: choose settings (see §3.3). Receive a game code, a player join link, a QR code, and a Portal link. No account system; the host is identified by a secret **host token** (random, ≥128 bits) stored in `localStorage` and in the host URL fragment so the host can reopen the page.
-2. **Lobby**: see joined players live; can kick a player.
-3. **Round control** (state machine, §3.1): `Open round` → (timer or manual) `Lock` → `Reveal` → `Next round` / `Finish game`.
-4. Can edit the pick `p`, timer, and range **between** rounds only.
-5. Can export results as CSV/JSON at any time after round 1.
-6. Can **end the game** and show the final podium.
+### 2.2 Luồng người dẫn
+1. **Tạo trò chơi**: chọn cài đặt (xem §3.3). Nhận mã trò chơi, link tham gia của người chơi, mã QR và link Portal. Không có hệ thống tài khoản; người dẫn được xác định bằng **host token** bí mật (ngẫu nhiên, ≥128 bit) lưu trong `localStorage` và trong fragment của URL người dẫn để có thể mở lại trang.
+2. **Sảnh**: xem danh sách người chơi đã tham gia theo thời gian thực; có thể đuổi một người chơi.
+3. **Điều khiển vòng** (máy trạng thái, §3.1): `Open round` → (hẹn giờ hoặc thủ công) `Lock` → `Reveal` → `Next round` / `Finish game`.
+4. Chỉ có thể chỉnh `p`, hẹn giờ và miền giá trị **giữa các vòng**.
+5. Có thể xuất kết quả dưới dạng CSV/JSON bất kỳ lúc nào sau vòng 1.
+6. Có thể **kết thúc trò chơi** và hiển thị bục chung cuộc.
 
-### 2.3 Portal (the projected screen) — the core requirement
-Read-only, auto-updating, readable from the back of a room (large type, high contrast, minimum 28 px for secondary text at 1080p). Dark theme by default. No scrolling; everything fits one 16:9 viewport and scales with `vw`/`vh`. Designed so a player never needs to look at their phone to follow what is happening.
+### 2.3 Portal (màn hình trình chiếu) — yêu cầu cốt lõi
+Chỉ đọc, tự động cập nhật, dễ đọc từ cuối phòng (chữ lớn, tương phản cao, văn bản phụ tối thiểu 28 px ở độ phân giải 1080p). Mặc định dùng giao diện tối. Không cuộn; mọi thứ vừa trong một khung nhìn 16:9 và co giãn theo `vw`/`vh`. Thiết kế để người chơi không cần nhìn vào điện thoại vẫn theo dõi được diễn biến.
 
-States and what the Portal shows:
+Trạng thái và nội dung Portal hiển thị:
 
-| Game state | Portal content |
+| Trạng thái trò chơi | Nội dung Portal |
 |------------|----------------|
-| **Lobby** | Huge game code, join URL and **QR code**, live list/grid of joined player names animating in, player count. Short rules panel (the 4 steps from §1). |
-| **Round open** | Round number, the rule ("Pick a number 0–100. Closest to **80% of the average** wins." (text derived from the configured `p`)), big **countdown** (if timer), live progress ring "23 / 31 submitted", and names of players who have submitted shown as ticks (**names only, never values**). |
-| **Round locked** | "Picks are in!" with a short suspense animation (≈3 s, skippable by host). |
-| **Reveal** | Animated sequence: (1) histogram of all picks builds up bin by bin on a 0–100 axis; (2) a vertical marker sweeps in for the **average**; (3) a second marker for the **target** (`p × average`); (4) winner(s) highlighted with name, pick and distance. Anonymous picks are shown as dots by default; the host can toggle "show names on reveal". |
-| **Between rounds** | Leaderboard (top 10, cumulative points), plus a **trend chart** of average and target across rounds so far. |
-| **Nash reached** | Full-screen dramatic announcement "Nash equilibrium reached — everyone chose 0", then a card revealing **Rule 1** with a short plain-language explanation and example. Held until the host advances. |
-| **Escalation round** | Same as Round open/Reveal, plus a persistent **Active rules** sidebar (numbered cards for each rule in force), the **players remaining** counter, and eliminated players greyed out with their elimination round. Reveal sequence adds a step: highlight duplicates (Rule 1), show the `0` / `100` interaction (Rule 2), and finish with the **elimination moment** (name of the eliminated player, animated). The newly added rule is announced after the elimination. |
-| **Final** | Podium (top 3), the all-rounds trend chart with a dashed line at the theoretical equilibrium `0`, and the **debrief panel**: "Level-k reasoning" explainer plotting where the room's picks fell relative to the level-k values `50 · pᵏ` (for `p = 0.8`: 50 / 40 / 32 / 25.6 / 20.5 … 0; see §3.5). |
+| **Sảnh** | Mã trò chơi thật lớn, URL tham gia và **mã QR**, danh sách/lưới tên người chơi tham gia trực tiếp với hiệu ứng xuất hiện, số người chơi. Bảng quy tắc ngắn (4 bước ở §1). |
+| **Vòng mở** | Số vòng, quy tắc (“Chọn một số 0–100. Người gần **80% giá trị trung bình** nhất sẽ thắng.” (văn bản lấy từ `p` đã cấu hình)), **bộ đếm ngược** lớn (nếu có hẹn giờ), vòng tiến độ trực tiếp “23 / 31 đã gửi”, và tên những người đã gửi hiển thị dưới dạng dấu tick (**chỉ tên, không bao giờ hiển thị giá trị**). |
+| **Vòng bị khóa** | “Các lựa chọn đã được chốt!” cùng hiệu ứng hồi hộp ngắn (≈3 giây, người dẫn có thể bỏ qua). |
+| **Công bố** | Chuỗi hiệu ứng: (1) biểu đồ histogram của tất cả lựa chọn được dựng từng bin trên trục 0–100; (2) một dấu dọc quét vào cho **giá trị trung bình**; (3) dấu thứ hai cho **mục tiêu** (`p × average`); (4) làm nổi bật người thắng cùng tên, lựa chọn và khoảng cách. Mặc định lựa chọn ẩn danh được hiển thị dưới dạng chấm; người dẫn có thể bật “hiển thị tên khi công bố”. |
+| **Giữa các vòng** | Bảng xếp hạng (top 10, điểm tích lũy), cùng **biểu đồ xu hướng** của giá trị trung bình và mục tiêu qua các vòng đã chơi. |
+| **Đã đạt Nash** | Thông báo ấn tượng toàn màn hình “Đã đạt cân bằng Nash — mọi người đều chọn 0”, sau đó là thẻ hiển thị **Quy tắc 1** với giải thích ngắn bằng ngôn ngữ đơn giản và ví dụ. Giữ nguyên cho đến khi người dẫn chuyển tiếp. |
+| **Vòng leo thang** | Giống Vòng mở/Công bố, cộng thêm thanh bên **Các quy tắc đang hoạt động** (các thẻ được đánh số cho từng quy tắc đang có hiệu lực), bộ đếm **người chơi còn lại**, và người chơi bị loại được làm mờ cùng vòng bị loại. Chuỗi công bố thêm một bước: làm nổi bật các lựa chọn trùng lặp (Quy tắc 1), hiển thị tương tác `0` / `100` (Quy tắc 2), và kết thúc bằng **khoảnh khắc loại** (tên người bị loại, có hiệu ứng). Quy tắc mới thêm được thông báo sau khi loại. |
+| **Chung cuộc** | Bục top 3, biểu đồ xu hướng tất cả các vòng với đường nét đứt tại cân bằng lý thuyết `0`, và **bảng tổng kết**: phần giải thích “Lập luận cấp độ-k” biểu diễn vị trí lựa chọn của phòng so với các giá trị cấp độ-k `50 · pᵏ` (với `p = 0.8`: 50 / 40 / 32 / 25,6 / 20,5 … 0; xem §3.5). |
 
-Portal requirements:
-- Updates within **≤ 2 s** of any state change (see §4.2 on transport).
-- Reconnects silently after a network drop; shows a small "reconnecting…" badge, never a blank or error screen.
-- Fullscreen friendly (hides cursor after 3 s idle; `F` key toggles fullscreen).
-- Audience-safe: individual picks are **never** sent to the Portal client before the Reveal state (enforce on the server, not just in the UI).
-- Works with up to **200 players** without layout breaking (name grid switches to compact mode / count only above ~60 names).
+Yêu cầu Portal:
+- Cập nhật trong vòng **≤ 2 giây** sau mọi thay đổi trạng thái (xem §4.2 về phương thức truyền tải).
+- Tự động kết nối lại sau khi mạng bị ngắt; hiển thị huy hiệu nhỏ “đang kết nối lại…”, không bao giờ hiển thị màn hình trống hoặc lỗi.
+- Thân thiện với chế độ toàn màn hình (ẩn con trỏ sau 3 giây không hoạt động; phím `F` bật/tắt toàn màn hình).
+- An toàn cho khán giả: **không bao giờ** gửi lựa chọn riêng lẻ tới client Portal trước trạng thái Công bố (phải thực thi trên server, không chỉ trong UI).
+- Hoạt động với tối đa **200 người chơi** mà không vỡ bố cục (lưới tên chuyển sang chế độ gọn / chỉ hiển thị số lượng khi vượt khoảng 60 tên).
 
 ---
 
-## 3. Functional requirements
+## 3. Yêu cầu chức năng
 
-### 3.1 Game state machine
+### 3.1 Máy trạng thái trò chơi
 ```
 LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED → (ROUND_OPEN | FINISHED)
 ```
-- Transitions are triggered only by the host (or by the timer expiring for `ROUND_OPEN → ROUND_LOCKED`, evaluated server-side).
-- Server is the single source of truth. Clients never compute results.
-- All transitions are idempotent (repeated host clicks must not double-advance).
-- Game also carries `phase: NORMAL | ESCALATION`, `activeRules: number[]`, and per-player `status: ACTIVE | ELIMINATED` (with `eliminatedInRound`). On `ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED` the server evaluates, in order: round result (§3.2 with rules), Nash trigger (if `NORMAL`), elimination (if `ESCALATION`) and rule activation. The `FINISHED` state is also entered automatically when one active player remains.
-- Only `ACTIVE` players may submit picks and are counted in "N / M submitted".
+- Chuyển trạng thái chỉ do người dẫn kích hoạt (hoặc do hẹn giờ hết hạn đối với `ROUND_OPEN → ROUND_LOCKED`, được đánh giá phía server).
+- Server là nguồn sự thật duy nhất. Client không bao giờ tự tính kết quả.
+- Mọi chuyển trạng thái đều idempotent (những lần bấm lặp lại của người dẫn không được chuyển tiến hai lần).
+- Trò chơi cũng chứa `phase: NORMAL | ESCALATION`, `activeRules: number[]` và `status: ACTIVE | ELIMINATED` cho từng người chơi (kèm `eliminatedInRound`). Khi `ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED`, server lần lượt đánh giá kết quả vòng (§3.2 với các quy tắc), điều kiện Nash (nếu `NORMAL`), việc loại (nếu `ESCALATION`) và kích hoạt quy tắc. Trạng thái `FINISHED` cũng được tự động chuyển sang khi chỉ còn một người chơi đang hoạt động.
+- Chỉ người chơi `ACTIVE` mới được gửi lựa chọn và được tính trong “N / M đã gửi”.
 
-### 3.2 Scoring and winner rules
+### 3.2 Quy tắc tính điểm và người thắng
 - `average = mean(all valid picks)`; `target = p × average`.
-- Winner = pick(s) with minimum `|pick − target|`. **Ties**: all tied players win and each gets full points (do not split randomly).
-- In `ESCALATION`, apply the active rules from §1 with their precedence (Rule 2 → Rule 1 → base). Implement each rule as a pure function `(picks, ctx) → { winners?, disqualified? }` registered in an ordered rule list, so adding Rule 3+ needs no change to the state machine.
-- Only `ACTIVE` players' picks enter the average. The average is computed **before** any rule filtering.
-- Rule 1 compares picks after rounding to the configured step (so `12.0` and `12` are duplicates); exact decimal-safe comparison, no float epsilon.
-- Players who did not submit in a round get no pick and 0 points; they are excluded from the average (do not auto-fill).
-- Points per round (configurable): winner(s) `10`; optional "close call" bonus `3` for within 2 units of target; default scoring is winner-only. Cumulative score decides the leaderboard; ties on the leaderboard share rank.
-- Picks are clamped/validated server-side to `[min, max]` and rounded to the configured step. Invalid input is rejected with a message, never silently altered.
-- Use exact decimal-safe arithmetic (e.g. work in integers scaled by 10 or 100) so that results are deterministic and tie detection is reliable.
+- Người thắng = (những) lựa chọn có `|pick − target|` nhỏ nhất. **Hòa**: tất cả người hòa đều thắng và mỗi người nhận đủ điểm (không chia ngẫu nhiên).
+- Trong `ESCALATION`, áp dụng các quy tắc đang hoạt động ở §1 theo độ ưu tiên của chúng (Quy tắc 2 → Quy tắc 1 → cơ bản). Cài đặt mỗi quy tắc thành một hàm thuần `(picks, ctx) → { winners?, disqualified? }` được đăng ký trong một danh sách quy tắc có thứ tự, để thêm Quy tắc 3+ không cần thay đổi máy trạng thái.
+- Chỉ lựa chọn của người chơi `ACTIVE` được đưa vào giá trị trung bình. Giá trị trung bình được tính **trước** khi lọc theo quy tắc.
+- Quy tắc 1 so sánh lựa chọn sau khi làm tròn theo bước đã cấu hình (vì vậy `12.0` và `12` là trùng nhau); so sánh thập phân chính xác, không dùng epsilon số thực.
+- Người chơi không gửi trong một vòng không có lựa chọn và nhận 0 điểm; họ bị loại khỏi giá trị trung bình (không tự động điền).
+- Điểm mỗi vòng (có thể cấu hình): người thắng `10`; tùy chọn thưởng “suýt thắng” `3` cho người trong phạm vi 2 đơn vị so với mục tiêu; mặc định chỉ tính điểm người thắng. Điểm tích lũy quyết định bảng xếp hạng; người hòa điểm trên bảng cùng hạng.
+- Lựa chọn được kiểm tra/giới hạn phía server trong `[min, max]` và làm tròn theo bước đã cấu hình. Dữ liệu không hợp lệ bị từ chối kèm thông báo, không bao giờ âm thầm thay đổi.
+- Dùng số học thập phân chính xác (ví dụ làm việc với số nguyên được nhân theo tỷ lệ 10 hoặc 100) để kết quả xác định và việc phát hiện hòa đáng tin cậy.
 
-### 3.3 Game settings (host, at creation; some editable between rounds)
-| Setting | Default | Notes |
+### 3.3 Cài đặt trò chơi (người dẫn, khi tạo; một số có thể chỉnh giữa các vòng)
+| Cài đặt | Mặc định | Ghi chú |
 |---------|---------|-------|
-| `p` (multiplier) | `0.8` | Presets: `0.8`, `2/3`, `1/2`, `4/3` (the `>1` variant has interesting dynamics; equilibrium is 0 *or* the max), custom |
-| Range | `0–100` | Integers or decimals (`step` 1, 0.1, 0.01) |
-| Rounds (Phase A) | `3` | 1–10; "unlimited until host ends" option. The game stays in Phase A until the Nash trigger or the round limit (then the host may end the game or force Phase B) |
-| Nash trigger | `all active players pick the range minimum` | Host can disable Phase B entirely |
-| Rule list | `[1, 2]` | Rules activated in order: Nash → Rule 1, then one more rule per elimination |
-| Timer per round | `60 s` | `off` allowed |
-| Allow changing pick until lock | on | |
-| Show names on reveal | off | |
-| Points for win / close-call bonus | `10` / `0` | |
-| Max players | `200` | |
+| `p` (hệ số) | `0.8` | Preset: `0.8`, `2/3`, `1/2`, `4/3` (biến thể `>1` có động lực thú vị; cân bằng là 0 *hoặc* giá trị lớn nhất), tùy chỉnh |
+| Miền giá trị | `0–100` | Số nguyên hoặc số thập phân (`step` 1, 0.1, 0.01) |
+| Số vòng (Giai đoạn A) | `3` | 1–10; tùy chọn “không giới hạn cho đến khi người dẫn kết thúc”. Trò chơi ở Giai đoạn A cho đến khi điều kiện Nash hoặc giới hạn vòng xảy ra (sau đó người dẫn có thể kết thúc trò chơi hoặc buộc chuyển sang Giai đoạn B) |
+| Điều kiện Nash | `tất cả người chơi đang hoạt động chọn giá trị nhỏ nhất của miền` | Người dẫn có thể tắt hoàn toàn Giai đoạn B |
+| Danh sách quy tắc | `[1, 2]` | Kích hoạt theo thứ tự: Nash → Quy tắc 1, sau đó thêm một quy tắc sau mỗi lần loại |
+| Hẹn giờ mỗi vòng | `60 s` | Cho phép `off` |
+| Cho phép thay đổi lựa chọn cho đến khi khóa | bật | |
+| Hiển thị tên khi công bố | tắt | |
+| Điểm thắng / thưởng suýt thắng | `10` / `0` | |
+| Số người chơi tối đa | `200` | |
 
-### 3.4 Players, identity, abuse
-- No login. Identity = (game code, display name) + a random player token in `localStorage`.
-- One pick per player per round. Re-submission replaces the previous pick until lock if allowed.
-- Basic profanity-agnostic safety: strip HTML, trim, collapse whitespace; render names as text only (no HTML injection into Portal).
-- Rate-limit join and submit endpoints per IP and per token.
-- Games expire automatically **24 h after the last activity**.
+### 3.4 Người chơi, danh tính, chống lạm dụng
+- Không đăng nhập. Danh tính = (mã trò chơi, tên hiển thị) + một token người chơi ngẫu nhiên trong `localStorage`.
+- Mỗi người chơi một lựa chọn mỗi vòng. Nếu cho phép thay đổi, việc gửi lại sẽ thay thế lựa chọn trước đó cho đến khi khóa.
+- An toàn cơ bản không phụ thuộc danh sách từ tục: loại HTML, cắt khoảng trắng ở đầu/cuối, gộp khoảng trắng; chỉ render tên dưới dạng văn bản (không chèn HTML vào Portal).
+- Giới hạn tần suất các endpoint tham gia và gửi lựa chọn theo IP và token.
+- Trò chơi tự động hết hạn **24 giờ sau lần hoạt động cuối cùng**.
 
-### 3.5 Debrief analytics (final screen and host dashboard)
-Computed from stored data:
-- Histogram of all picks per round and combined.
-- Average and target per round (trend chart; shows convergence toward 0 if it happens).
-- **Level-k classification** (informational): bin each first-round pick into the nearest level `Lk = 50·pᵏ` for the configured `p`. For the default `p = 0.8`: `L0 = 50` (random/naive), `L1 = 40`, `L2 = 32`, `L3 = 25.6`, `L4 = 20.5`, `L5 = 16.4`, … down to `≈ 0` (equilibrium). Compute levels from `p`; never hard-code them. Show the share of the room at each level as a bar chart.
-- Share of players who picked exactly `0`, exactly `50`, and `> 100·p` (`> 80` for the default; strictly dominated because the target can never exceed `100·p` — show as "dominated picks").
-- Compare the room's first-round average with reference values (≈ 36 in Nagel-style lab results; ≈ 40 business audiences; ≈ 25–30 economics experts — all for `p = 2/3`) as small footnote text labelled "typical results for p = 2/3", shown only when `p = 2/3`, not as exact claims.
+### 3.5 Phân tích tổng kết (màn hình chung cuộc và dashboard người dẫn)
+Tính toán từ dữ liệu đã lưu:
+- Histogram của tất cả lựa chọn theo từng vòng và gộp chung.
+- Giá trị trung bình và mục tiêu theo từng vòng (biểu đồ xu hướng; cho thấy sự hội tụ về 0 nếu xảy ra).
+- **Phân loại cấp độ-k** (mang tính thông tin): gom mỗi lựa chọn vòng đầu vào cấp độ gần nhất `Lk = 50·pᵏ` với `p` đã cấu hình. Với `p = 0.8` mặc định: `L0 = 50` (ngẫu nhiên/ngây thơ), `L1 = 40`, `L2 = 32`, `L3 = 25.6`, `L4 = 20.5`, `L5 = 16.4`, … giảm tới `≈ 0` (cân bằng). Tính các cấp độ từ `p`, tuyệt đối không hard-code. Hiển thị tỷ lệ của phòng ở mỗi cấp độ dưới dạng biểu đồ cột.
+- Tỷ lệ người chơi chọn chính xác `0`, chính xác `50` và `> 100·p` (`> 80` với mặc định; bị trội nghiêm ngặt vì mục tiêu không bao giờ vượt quá `100·p` — hiển thị là “lựa chọn bị trội”).
+- So sánh giá trị trung bình vòng đầu của phòng với các giá trị tham khảo (≈ 36 trong kết quả phòng thí nghiệm kiểu Nagel; ≈ 40 ở khán giả kinh doanh; ≈ 25–30 ở chuyên gia kinh tế — tất cả dành cho `p = 2/3`) dưới dạng chú thích nhỏ có nhãn “kết quả điển hình với p = 2/3”, chỉ hiển thị khi `p = 2/3`, không trình bày như các khẳng định chính xác.
 
-### 3.6 Host dashboard extras
-- Live table of players with submitted/not-submitted per round (host sees picks only after lock).
-- Export: `results.csv` (player, round, pick, distance, points) and `game.json` (full state).
-- "Reset game" returns to LOBBY keeping players; "End game" goes to FINISHED.
+### 3.6 Tính năng bổ sung của dashboard người dẫn
+- Bảng người chơi trực tiếp cho biết đã gửi/chưa gửi theo từng vòng (người dẫn chỉ thấy lựa chọn sau khi khóa).
+- Xuất: `results.csv` (player, round, pick, distance, points) và `game.json` (toàn bộ trạng thái).
+- “Đặt lại trò chơi” đưa trò chơi về `LOBBY` nhưng giữ nguyên người chơi; “Kết thúc trò chơi” chuyển sang `FINISHED`.
 
 ---
 
-## 4. Technical requirements
+## 4. Yêu cầu kỹ thuật
 
-### 4.1 Stack
-- **Next.js (App Router) + TypeScript**, deployed on **Vercel**. Tailwind CSS for styling. Charts via a lightweight library (e.g. Recharts or visx) or hand-rolled SVG — the reveal animation should be SVG/CSS (e.g. Framer Motion), not a canvas screenshot.
-- **State store: Upstash Redis** (Vercel Marketplace / Vercel KV-compatible). Chosen because Vercel serverless functions are stateless and have no persistent WebSocket support. Keep a thin `Store` interface (`getGame`, `mutateGame`, …) so the backend can be swapped (e.g. Supabase) without touching game logic.
-- Pure game logic (state machine, scoring, level-k bins) lives in `src/lib/game/` with **no framework or I/O imports** so it is fully unit-testable.
+### 4.1 Công nghệ
+- **Next.js (App Router) + TypeScript**, triển khai trên **Vercel**. Tailwind CSS để tạo kiểu. Biểu đồ dùng thư viện nhẹ (ví dụ Recharts hoặc visx) hoặc SVG tự viết — hiệu ứng công bố phải là SVG/CSS (ví dụ Framer Motion), không phải ảnh chụp canvas.
+- **Kho trạng thái: Upstash Redis** qua Vercel Marketplace. Các Function là stateless nên cần kho dùng chung, kể cả khi dùng WebSocket. Vercel KV cũ không còn được cung cấp cho dự án mới. Duy trì một interface `Store` mỏng (`getGame`, `mutateGame`, …) để có thể thay backend (ví dụ Supabase) mà không chạm vào logic trò chơi.
+- Logic trò chơi thuần (máy trạng thái, tính điểm, các bin cấp độ-k) nằm trong `src/lib/game/` và **không** import framework hay I/O để có thể kiểm thử đơn vị hoàn toàn.
 - Node ≥ 20, `npm`.
 
-### 4.2 Real-time transport
-Vercel functions cannot hold long-lived WebSocket connections, so:
-- Clients (Portal, Host, Players) **poll** `GET /api/games/[code]/state?role=…&v=<version>` every **1 s** (Portal/Host) and **2 s** (Players) with `ETag` / version so unchanged state returns `304` cheaply. Add jitter ±200 ms to avoid thundering herd with 200 players.
-- Each game carries a monotonically increasing `version`.
-- Pause polling when the tab is hidden (players only; **never** pause the Portal).
-- The role determines which **projection** of the state the server returns (see §4.4).
-- If time allows, an SSE upgrade path is acceptable but polling must remain the fallback.
+### 4.2 Phương thức truyền tải thời gian thực
+MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ WebSocket ở Public Beta, nhưng mỗi kết nối vẫn bị giới hạn theo thời lượng Function và cần kho trạng thái chung. Vì vậy:
+- Client (Portal, Host, Player) **poll** `GET /api/games/[code]/state?role=…&v=<version>` mỗi **1 giây** (Portal/Host) và **2 giây** (Player), kèm `ETag` / version để trạng thái không đổi trả về `304` với chi phí thấp. Thêm jitter ±200 ms để tránh bão request với 200 người chơi.
+- Mỗi trò chơi có `version` tăng đơn điệu.
+- Tạm dừng polling khi tab bị ẩn (chỉ player; **không bao giờ tạm dừng Portal**).
+- Vai trò quyết định **projection** trạng thái mà server trả về (xem §4.4).
+- Nếu có thời gian, có thể nâng cấp lên SSE nhưng polling phải vẫn là phương án dự phòng.
 
-### 4.3 API (all JSON, under `/api`)
-| Method & path | Auth | Purpose |
+### 4.3 API (tất cả JSON, dưới `/api`)
+| Phương thức & đường dẫn | Xác thực | Mục đích |
 |---------------|------|---------|
-| `POST /games` | none | Create game → `{ code, hostToken }` |
-| `POST /games/[code]/join` | none | `{ name }` → `{ playerToken }` |
-| `GET /games/[code]/state` | role query + token | Role-specific projection of state |
+| `POST /games` | không | Tạo trò chơi → `{ code, hostToken }` |
+| `POST /games/[code]/join` | không | `{ name }` → `{ playerToken }` |
+| `GET /games/[code]/state` | query role + token | Projection trạng thái theo vai trò |
 | `POST /games/[code]/pick` | player token | `{ round, value }` |
 | `POST /games/[code]/host/[action]` | host token | `open`, `lock`, `reveal`, `next`, `finish`, `reset`, `settings`, `kick` |
 | `GET /games/[code]/export` | host token | CSV / JSON |
 
-- Portal access needs only the game code (it is public, read-only, and receives the audience-safe projection).
-- Validate every body with a schema validator (e.g. Zod). Return structured errors `{ error: { code, message } }`.
-- Concurrency: use Redis atomic operations or optimistic versioning (`WATCH`/Lua) so concurrent picks and host transitions cannot corrupt state.
+Portal chỉ cần mã trò chơi để truy cập (công khai, chỉ đọc và nhận projection an toàn cho khán giả).
+- Kiểm tra mọi body bằng trình xác thực schema (ví dụ Zod). Trả về lỗi có cấu trúc `{ error: { code, message } }`.
+- Đồng thời: dùng thao tác atomic của Redis hoặc optimistic versioning (`WATCH`/Lua) để các lượt gửi lựa chọn và chuyển trạng thái của người dẫn đồng thời không làm hỏng dữ liệu.
 
-### 4.4 Data projections (security-critical)
-| Role | Receives |
+### 4.4 Projection dữ liệu (tối quan trọng về bảo mật)
+| Vai trò | Nhận được |
 |------|----------|
-| Portal | Game settings, state, player names, **submitted flags**, counts; picks/aggregates **only** in `ROUND_REVEALED` and `FINISHED` |
-| Player | Same as Portal plus their **own** pick at all times |
-| Host | Everything, but other players' picks only after `ROUND_LOCKED` |
+| Portal | Cài đặt trò chơi, trạng thái, tên người chơi, cờ đã gửi, số lượng; lựa chọn/tổng hợp **chỉ trong** `ROUND_REVEALED` và `FINISHED` |
+| Player | Giống Portal và thêm lựa chọn của chính mình ở mọi thời điểm |
+| Host | Mọi thứ, nhưng chỉ thấy lựa chọn của người chơi khác sau `ROUND_LOCKED` |
 
-Tests must assert that a Portal or Player response during `ROUND_OPEN` contains no other player's pick value.
+Test phải khẳng định response của Portal hoặc Player trong `ROUND_OPEN` không chứa giá trị lựa chọn của người chơi khác.
 
-### 4.5 Non-functional
-- 200 concurrent players, 1 s polling ⇒ ~200–250 req/s peak: responses must be small (< 5 KB typical, gzip) and cheap (one Redis read). Use CDN-uncacheable but `ETag`-based 304s.
-- Mobile-first for the Player UI (≥ 360 px wide, large tap targets, no zoom on input focus: font-size ≥ 16 px). Portal is desktop-only, 16:9.
-- Accessibility: sufficient contrast (WCAG AA), `aria-live` for status changes on the Player view, no information conveyed by color alone on the Portal.
-- i18n: all UI strings in a dictionary; ship **Vietnamese (default)** and **English**, switchable on the host page and per player.
-- No analytics, no third-party trackers, no personal data beyond a chosen display name.
+### 4.5 Yêu cầu phi chức năng
+- 200 người chơi đồng thời, polling 1 giây ⇒ khoảng 200–250 request/giây ở đỉnh: response phải nhỏ (< 5 KB thông thường, gzip) và rẻ (một lần đọc Redis). Không cache qua CDN nhưng dùng `ETag` để trả `304`.
+- Mobile-first cho UI Player (rộng ≥ 360 px, vùng chạm lớn, không phóng to khi focus ô nhập: cỡ chữ ≥ 16 px). Portal chỉ dành cho desktop, 16:9.
+- Khả năng tiếp cận: tương phản đủ (WCAG AA), `aria-live` cho thay đổi trạng thái trên giao diện Player, không truyền tải thông tin chỉ bằng màu sắc trên Portal.
+- i18n: mọi chuỗi UI nằm trong một dictionary; cung cấp **tiếng Việt (mặc định)** và **tiếng Anh**, có thể chuyển đổi trên trang host và theo từng player.
+- Không phân tích dữ liệu, không tracker bên thứ ba, không dữ liệu cá nhân ngoài tên hiển thị do người dùng chọn.
 
 ---
 
-## 5. Suggested project layout
+## 5. Cấu trúc dự án đề xuất
 ```
 .
 ├─ src/
 │  ├─ app/
-│  │  ├─ page.tsx                 # Join screen
+│  │  ├─ page.tsx                 # Màn hình tham gia
 │  │  ├─ play/[code]/page.tsx     # Player
-│  │  ├─ host/page.tsx            # Create game
-│  │  ├─ host/[code]/page.tsx     # Host console
-│  │  ├─ portal/[code]/page.tsx   # Projected screen
-│  │  └─ api/games/...            # Route handlers (§4.3)
+│  │  ├─ host/page.tsx            # Tạo trò chơi
+│  │  ├─ host/[code]/page.tsx     # Console người dẫn
+│  │  ├─ portal/[code]/page.tsx   # Màn hình trình chiếu
+│  │  └─ api/games/...            # Route handler (§4.3)
 │  ├─ lib/
-│  │  ├─ game/                    # Pure logic: state machine, scoring, levelK
-│  │  ├─ store/                   # Store interface + Upstash implementation + in-memory (tests/dev)
+│  │  ├─ game/                    # Logic thuần: state machine, scoring, levelK
+│  │  ├─ store/                   # Store interface + triển khai Upstash + in-memory (test/dev)
 │  │  └─ i18n/
 │  └─ components/                 # Histogram, Podium, Countdown, QR, Leaderboard, TrendChart …
-├─ tests/                         # Vitest unit + API tests; Playwright for the full flow
+├─ tests/                         # Test đơn vị + API bằng Vitest; Playwright cho toàn bộ luồng
 ├─ docs/decisions.md
 └─ README.md
 ```
 
-## 6. Environment and deployment
+## 6. Môi trường và triển khai
 ```
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
-NEXT_PUBLIC_BASE_URL=        # used for the join link and QR code
+NEXT_PUBLIC_BASE_URL=        # dùng cho link tham gia và mã QR
 ```
-- Local dev must work with **no external services** using the in-memory store (`STORE=memory`).
-- Deploy: push to GitHub, import the repo in Vercel, attach an Upstash Redis integration, set env vars. No build-time secrets beyond those above.
-- Add `npm run dev`, `npm test`, `npm run lint`, `npm run build` scripts.
+- Môi trường dev cục bộ phải chạy được **không cần dịch vụ bên ngoài** bằng store trong bộ nhớ (`STORE=memory`).
+- Triển khai: push lên GitHub, import repo vào Vercel, gắn tích hợp Upstash Redis, thiết lập biến môi trường. Không có secret lúc build ngoài các biến ở trên.
+- Thêm các script `npm run dev`, `npm test`, `npm run lint`, `npm run build`.
 
-## 7. Acceptance criteria
-1. Host creates a game, a second browser (Portal) and ≥ 3 simulated phones join; lobby shows names live on the Portal within 2 s.
-2. Full round: open → picks → lock → reveal produces the correct average, target and winner(s), verified by unit tests including ties, no-shows, `p = 0.8` (default), `p = 2/3`, `p = 1/2`, `p = 4/3`, decimal steps.
-   - Escalation: Nash trigger fires only when all active players picked the minimum; Rule 1 (duplicates lose, including a three-way duplicate, duplicates still counted in the average); Rule 2 (`0` + single `100` → `100` wins; `0` + two `100`s with Rule 1 active → fallback); precedence Rule 2 → Rule 1 → base; exactly one elimination per Phase B round and never a winner; elimination tiers (non-submitter, then duplicate, then largest distance) and seeded tie-break; the game ends when one active player remains; eliminated players cannot submit.
-3. During `ROUND_OPEN`, network inspection of Portal and other Players' responses reveals **no** pick values (automated test).
-4. Closing and reopening a Player or Host tab restores the session; Portal survives a 30 s offline period and resyncs.
-5. 200 simulated players (script in `tests/load/`) complete a round with p95 state-poll latency < 500 ms.
-6. Final screen shows leaderboard, convergence chart, and the level-k debrief.
-7. `npm run build` passes and the app runs on Vercel with Upstash; `STORE=memory npm run dev` runs offline.
+## 7. Tiêu chí nghiệm thu
+1. Người dẫn tạo trò chơi, một trình duyệt thứ hai (Portal) và ≥ 3 điện thoại mô phỏng tham gia; sảnh hiển thị tên trực tiếp trên Portal trong vòng 2 giây.
+2. Một vòng hoàn chỉnh: mở → gửi lựa chọn → khóa → công bố tạo ra đúng giá trị trung bình, mục tiêu và người thắng, được kiểm chứng bằng test đơn vị bao gồm hòa, không gửi, `p = 0.8` (mặc định), `p = 2/3`, `p = 1/2`, `p = 4/3`, các bước thập phân.
+   - Leo thang: điều kiện Nash chỉ kích hoạt khi mọi người chơi đang hoạt động chọn giá trị nhỏ nhất; Quy tắc 1 (trùng lặp thua, bao gồm trùng ba người, lựa chọn trùng vẫn tính vào trung bình); Quy tắc 2 (`0` + một `100` → `100` thắng; `0` + hai `100` khi Quy tắc 1 hoạt động → quay về cách tính); độ ưu tiên Quy tắc 2 → Quy tắc 1 → cơ bản; chính xác một lần loại mỗi vòng Giai đoạn B và không bao giờ loại người thắng; các nhóm loại (không gửi, sau đó trùng lặp, sau đó khoảng cách lớn nhất) và tie-break có seed; trò chơi kết thúc khi còn một người chơi đang hoạt động; người chơi bị loại không thể gửi.
+3. Trong `ROUND_OPEN`, kiểm tra mạng của response từ Portal và các Player khác không cho thấy giá trị lựa chọn nào (test tự động).
+4. Đóng và mở lại tab Player hoặc Host khôi phục phiên; Portal vẫn hoạt động sau 30 giây offline và đồng bộ lại.
+5. 200 người chơi mô phỏng (script trong `tests/load/`) hoàn thành một vòng với độ trễ polling trạng thái p95 < 500 ms.
+6. Màn hình chung cuộc hiển thị bảng xếp hạng, biểu đồ hội tụ và phần tổng kết cấp độ-k.
+7. `npm run build` chạy thành công và ứng dụng chạy trên Vercel với Upstash; `STORE=memory npm run dev` chạy offline.
 
-## 8. Out of scope (v1)
-Accounts and persistent profiles, payments, multi-host/co-host, video/voice, moderation dashboards, native apps, long-term game history beyond the 24 h expiry.
+## 8. Ngoài phạm vi (v1)
+Tài khoản và hồ sơ cố định, thanh toán, nhiều người dẫn/đồng dẫn, video/thoại, dashboard kiểm duyệt, ứng dụng native, lịch sử trò chơi dài hạn ngoài thời hạn 24 giờ.
 
-## 9. Nice-to-have (v2)
-Sound effects on reveal; team mode; "predict the average" side question; replay of a finished game; other guessing-game variants (e.g. Keynes's original "pick the most popular option" with multiple-choice answers).
+## 9. Có thể bổ sung (v2)
+Hiệu ứng âm thanh khi công bố; chế độ đội; câu hỏi phụ “dự đoán giá trị trung bình”; phát lại trò chơi đã kết thúc; các biến thể trò chơi đoán khác (ví dụ “chọn phương án phổ biến nhất” nguyên bản của Keynes với các đáp án trắc nghiệm).
