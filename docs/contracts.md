@@ -8,7 +8,7 @@
 |---|---|
 | `room` | Room duy nhất của ứng dụng; có `code` 4 chữ cái, roster snapshot và các run. Reset không tạo room mới. |
 | `run` | Một lần chơi từ Lobby đến Finish hoặc Reset, có `runId` riêng. Các vòng, điểm và trạng thái loại thuộc run. |
-| `account` | Tài khoản từ `db/users.json`, có `username`/`password` và `teamId`. Chưa đăng nhập thì chưa là participant. |
+| `account` | Tài khoản từ `db/seed.sql`, có `username`/`password` và `teamId`. Chưa đăng nhập thì chưa là participant. |
 | `participant` | Account đã đăng nhập room trước khi vòng 1 của run mở. Danh sách participant bị khóa khi mở vòng 1. |
 | `active` | Participant chưa bị loại. Mất kết nối không đổi trạng thái này. |
 | `pick` | Lựa chọn cuối cùng của participant trong một vòng, số nguyên `0..1000` biểu diễn bước `0.1`. |
@@ -16,28 +16,18 @@
 
 `version` thuộc room và **không trở về 0 sau RESET**. `runId` đổi sau RESET; một request chứa `runId` cũ không được ghi vào run mới.
 
-## 2. Dữ liệu JSON ở `db/`
+## 2. Seed roster SQL ở `db/`
 
-`db/teams.json` là mảng TeamSeed:
-
-```json
-[
-  { "id": "alpha", "name": "Alpha", "image": "/teams/alpha.png", "color": "#2563EB" }
-]
-```
-
-`db/users.json` là mảng UserSeed:
-
-```json
-[
-  { "username": "alice", "password": "abc123", "displayName": "Alice", "teamId": "alpha" }
-]
-```
+[`db/seed.sql`](../db/seed.sql) tạo hai bảng source `seed_teams` và
+`seed_users`, đồng thời là nơi Host điền roster trước lần tạo room đầu tiên.
+Một team có `id`, `name`, `image?`, `color?`; một user có `username`,
+`password`, `display_name?`, `team_id`. `display_name` được map sang
+`displayName` trong contract TypeScript.
 
 - `image`, `color`, `displayName` tùy chọn. `image` chỉ trỏ tới asset tĩnh trong `public/teams/`. Khi không có ảnh, UI hiện tên/màu dự phòng.
 - `username` duy nhất theo dạng trim + lowercase; `displayName` hiển thị như văn bản thuần. `teamId` phải tồn tại. `id` đội duy nhất. Từ chối file sai schema khi tạo room; không yêu cầu số đội/người cụ thể. Không bao giờ trả `password` qua state/export công khai.
 - Khi tạo room, server snapshot cả đội và account vào store. Sửa file rồi deploy lại không thay đổi room đã có. Reset giữ snapshot này. Credential được lưu ở vùng server riêng, không nằm trong `RoomState` trả cho client.
-- `db/state.dev.json` là snapshot runtime trong dev, được ghi atomically bằng file tạm + rename, được gitignore và được nạp khi server dev khởi động. Chỉ hỗ trợ một process dev ghi file.
+- `db/keynesian-beauty-contest.dev.db` là SQLite database runtime trong dev, được gitignore và được migrate/kiểm tra schema khi server dev khởi động. Chỉ hỗ trợ một process dev ghi file.
 
 ## 3. Kiểu dữ liệu dùng chung
 
@@ -178,7 +168,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 | `POST /api/host/login` | public | `{username,password}` → cookie Host `HttpOnly`, `SameSite=Strict`. Credentials so với env. |
 | `POST /api/host/logout` | Host | Xóa cookie. |
 | `GET /api/room` | Host | Mã room/run hiện tại nếu đã tạo; không có thì `404`. |
-| `POST /api/room` | Host | Tạo room duy nhất từ seed JSON → `{code, runId, version}`; lần sau `409 ROOM_EXISTS`. |
+| `POST /api/room` | Host | Tạo room duy nhất từ roster trong `seed_teams`/`seed_users` → `{code, runId, version}`; lần sau `409 ROOM_EXISTS`. |
 | `GET /api/room/state?code=ABCD&view=public|player|host` | Public, Player hoặc Host | `view=public` không cần credential; `player` cần Player token; `host` cần Host cookie. Server kiểm tra quyền trước khi trả projection/`304`; mã sai → `404`. |
 | `POST /api/room/login` | account seed | `{code,username,password}` → `{playerToken, account}`. Token mới cho account, tự join nếu run còn ở LOBBY; sau đó chỉ account đã là participant được đăng nhập lại. |
 | `POST /api/room/join` | Player token | `{runId}` → `{joined,version}`; idempotent. Chỉ thêm participant ở LOBBY; dùng khi token cũ nhận `runId` mới sau reset. |
@@ -196,7 +186,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 - Host cookie dùng `HttpOnly`, `Secure` ở production, `SameSite=Strict`; API ghi kiểm tra `Origin`. Login Host/Player và pick có rate limit cơ bản.
 - `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,username,displayName,teamId,pick,distance,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có password/token. Archive chỉ Host xem và xuất.
 
-Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `STORE=memory|upstash`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `STORE=memory`; production bắt buộc `upstash`. Không đưa biến secret vào `NEXT_PUBLIC_*`.
+Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `TURSO_DATABASE_URL=file:db/keynesian-beauty-contest.dev.db`; production bắt buộc `TURSO_DATABASE_URL` là URL `libsql://`/`https://` của Turso và có `TURSO_AUTH_TOKEN`. Không đưa token vào `NEXT_PUBLIC_*`.
 
 ## 6. Store và độ bền dữ liệu
 
@@ -209,8 +199,8 @@ interface Store {
 }
 ```
 
-- `StoreCommand` gồm create/login/pick/host transition/reset. Một operation phải kiểm tra trạng thái và ghi mutation như một đơn vị atomic; version tăng đúng một lần khi trạng thái công khai thay đổi. Cách chia key Redis là chi tiết nội bộ của adapter, không lộ vào game logic/API/UI.
-- Dev adapter: RAM + snapshot JSON atomically sau mỗi mutation, nạp lại khi khởi động. Production adapter: Upstash Redis REST, dùng Lua `EVAL` cho điều kiện đọc-rồi-ghi; REST `WATCH` không có. Hai adapter phải chạy chung contract tests, đặc biệt burst 50 pick, lock-vs-pick, reveal lặp và reset-vs-poll. [Upstash EVAL](https://upstash.com/docs/redis/sdks/ts/commands/scripts/eval), [REST compatibility](https://upstash.com/docs/redis/features/restapi).
+- `StoreCommand` gồm create/login/pick/host transition/reset. Một operation phải kiểm tra trạng thái và ghi mutation như một đơn vị SQL atomic; version tăng đúng một lần khi trạng thái công khai thay đổi. Lược đồ, transaction và chỉ mục là chi tiết nội bộ của adapter, không lộ vào game logic/API/UI.
+- Một adapter SQLite-compatible dùng `@libsql/client`: dev mở file SQLite cục bộ, production kết nối Turso/libSQL từ xa. Mọi mutation dùng transaction ghi và compare-and-swap `room.version` để không mất cập nhật giữa các Function; không dựa vào mutex bộ nhớ. Hai cấu hình phải chạy chung contract tests, đặc biệt burst 50 pick, lock-vs-pick, reveal lặp và reset-vs-poll. File SQLite cục bộ không được dùng ở Vercel vì Function filesystem là ephemeral/read-only ngoài `/tmp`. [Vercel: SQLite on serverless](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel), [Turso Cloud on Vercel](https://vercel.com/marketplace/tursocloud/database).
 - Run hoàn tất được archive một lần khi FINISH; RESET của run đã FINISHED không tạo archive trùng. Run đang chơi và room shell phải sống qua restart/deploy. Dữ liệu chi tiết của run đã kết thúc/reset có TTL 7 ngày; room shell (code, roster) còn để Host reset và chơi lại. Export sau ít nhất một vòng phải được tạo từ snapshot đã lưu, không tái tính bằng cấu hình hiện tại.
 
 ## 7. Contract tests phải qua trước khi chia nhánh
@@ -219,4 +209,4 @@ interface Store {
 2. State transition hợp lệ/sai; `commandId` lặp; `expectedVersion` cũ; reset tạo `runId` mới và giữ archive cũ.
 3. Số học `0.8`, `2/3`, `1/2`, hòa, 0 pick, không gửi, trùng đôi/ba, Rule 2 và fallback, Nash, Host escalation, loại bằng seed.
 4. Public/Player/Host projection tại OPEN, LOCKED, REVEALED không rò pick, password hoặc token.
-5. Memory adapter khôi phục snapshot sau restart; Redis adapter không mất pick khi 50 request đồng thời.
+5. SQLite dev database khôi phục state sau restart; Turso/libSQL không mất pick khi 50 request đồng thời.

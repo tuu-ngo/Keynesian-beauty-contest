@@ -178,7 +178,7 @@ Tính toán từ dữ liệu đã lưu:
 
 ### 4.1 Công nghệ
 - **Next.js (App Router) + TypeScript**, triển khai trên **Vercel**. Tailwind CSS để tạo kiểu. Biểu đồ dùng thư viện nhẹ (ví dụ Recharts hoặc visx) hoặc SVG tự viết — hiệu ứng công bố phải là SVG/CSS (ví dụ Framer Motion), không phải ảnh chụp canvas.
-- **Kho trạng thái: Upstash Redis** qua Vercel Marketplace. Các Function là stateless nên cần kho dùng chung, kể cả khi dùng WebSocket. Vercel KV cũ không còn được cung cấp cho dự án mới. Duy trì một interface `Store` mỏng (`getGame`, `mutateGame`, …) để có thể thay backend (ví dụ Supabase) mà không chạm vào logic trò chơi.
+- **Kho trạng thái: Turso/libSQL** (SQLite-compatible) qua Vercel Marketplace. Các Function là stateless nên cần database từ xa dùng chung. Không dùng file SQLite cục bộ trong Vercel Function vì filesystem không bền vững/không chia sẻ giữa các instance. Duy trì một interface `Store` mỏng để logic trò chơi không phụ thuộc driver database.
 - Logic trò chơi thuần (máy trạng thái, tính điểm, các bin cấp độ-k) nằm trong `src/lib/game/` và **không** import framework hay I/O để có thể kiểm thử đơn vị hoàn toàn.
 - Node ≥ 20, `npm`.
 
@@ -202,7 +202,7 @@ MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ 
 
 Portal chỉ cần mã trò chơi để truy cập (công khai, chỉ đọc và nhận projection an toàn cho khán giả).
 - Kiểm tra mọi body bằng trình xác thực schema (ví dụ Zod). Trả về lỗi có cấu trúc `{ error: { code, message } }`.
-- Đồng thời: dùng thao tác atomic của Redis hoặc optimistic versioning (`WATCH`/Lua) để các lượt gửi lựa chọn và chuyển trạng thái của người dẫn đồng thời không làm hỏng dữ liệu.
+- Đồng thời: dùng SQL transaction và optimistic compare-and-swap theo `version` để các lượt gửi lựa chọn và chuyển trạng thái của người dẫn đồng thời không làm hỏng dữ liệu.
 
 ### 4.4 Projection dữ liệu (tối quan trọng về bảo mật)
 | Vai trò | Nhận được |
@@ -214,7 +214,7 @@ Portal chỉ cần mã trò chơi để truy cập (công khai, chỉ đọc và
 Test phải khẳng định response của Portal hoặc Player trong `ROUND_OPEN` không chứa giá trị lựa chọn của người chơi khác.
 
 ### 4.5 Yêu cầu phi chức năng
-- 200 người chơi đồng thời, polling 1 giây ⇒ khoảng 200–250 request/giây ở đỉnh: response phải nhỏ (< 5 KB thông thường, gzip) và rẻ (một lần đọc Redis). Không cache qua CDN nhưng dùng `ETag` để trả `304`.
+- 200 người chơi đồng thời, polling 1 giây ⇒ khoảng 200–250 request/giây ở đỉnh: response phải nhỏ (< 5 KB thông thường, gzip) và rẻ (một snapshot SQL nhất quán). Không cache qua CDN nhưng dùng `ETag` để trả `304`.
 - Mobile-first cho UI Player (rộng ≥ 360 px, vùng chạm lớn, không phóng to khi focus ô nhập: cỡ chữ ≥ 16 px). Portal chỉ dành cho desktop, 16:9.
 - Khả năng tiếp cận: tương phản đủ (WCAG AA), `aria-live` cho thay đổi trạng thái trên giao diện Player, không truyền tải thông tin chỉ bằng màu sắc trên Portal.
 - i18n: mọi chuỗi UI nằm trong một dictionary; cung cấp **tiếng Việt (mặc định)** và **tiếng Anh**, có thể chuyển đổi trên trang host và theo từng player.
@@ -235,7 +235,7 @@ Test phải khẳng định response của Portal hoặc Player trong `ROUND_OPE
 │  │  └─ api/games/...            # Route handler (§4.3)
 │  ├─ lib/
 │  │  ├─ game/                    # Logic thuần: state machine, scoring, levelK
-│  │  ├─ store/                   # Store interface + triển khai Upstash + in-memory (test/dev)
+│  │  ├─ store/                   # Store interface + SQLite/libSQL repository và migrations
 │  │  └─ i18n/
 │  └─ components/                 # Histogram, Podium, Countdown, QR, Leaderboard, TrendChart …
 ├─ tests/                         # Test đơn vị + API bằng Vitest; Playwright cho toàn bộ luồng
@@ -245,12 +245,12 @@ Test phải khẳng định response của Portal hoặc Player trong `ROUND_OPE
 
 ## 6. Môi trường và triển khai
 ```
-UPSTASH_REDIS_REST_URL=
-UPSTASH_REDIS_REST_TOKEN=
+TURSO_DATABASE_URL=file:db/keynesian-beauty-contest.dev.db
+TURSO_AUTH_TOKEN=
 NEXT_PUBLIC_BASE_URL=        # dùng cho link tham gia và mã QR
 ```
-- Môi trường dev cục bộ phải chạy được **không cần dịch vụ bên ngoài** bằng store trong bộ nhớ (`STORE=memory`).
-- Triển khai: push lên GitHub, import repo vào Vercel, gắn tích hợp Upstash Redis, thiết lập biến môi trường. Không có secret lúc build ngoài các biến ở trên.
+- Môi trường dev cục bộ chạy với file SQLite gitignored; không cần dịch vụ bên ngoài.
+- Triển khai: push lên GitHub, import repo vào Vercel, gắn tích hợp Turso/libSQL và thiết lập biến môi trường. Không có secret lúc build ngoài các biến ở trên.
 - Thêm các script `npm run dev`, `npm test`, `npm run lint`, `npm run build`.
 
 ## 7. Tiêu chí nghiệm thu
@@ -261,7 +261,7 @@ NEXT_PUBLIC_BASE_URL=        # dùng cho link tham gia và mã QR
 4. Đóng và mở lại tab Player hoặc Host khôi phục phiên; Portal vẫn hoạt động sau 30 giây offline và đồng bộ lại.
 5. 200 người chơi mô phỏng (script trong `tests/load/`) hoàn thành một vòng với độ trễ polling trạng thái p95 < 500 ms.
 6. Màn hình chung cuộc hiển thị bảng xếp hạng, biểu đồ hội tụ và phần tổng kết cấp độ-k.
-7. `npm run build` chạy thành công và ứng dụng chạy trên Vercel với Upstash; `STORE=memory npm run dev` chạy offline.
+7. `npm run build` chạy thành công và ứng dụng chạy trên Vercel với Turso; `npm run dev` chạy với SQLite cục bộ.
 
 ## 8. Ngoài phạm vi (v1)
 Tài khoản và hồ sơ cố định, thanh toán, nhiều người dẫn/đồng dẫn, video/thoại, dashboard kiểm duyệt, ứng dụng native, lịch sử trò chơi dài hạn ngoài thời hạn 24 giờ.

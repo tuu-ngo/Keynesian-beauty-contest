@@ -8,4 +8,6 @@ coverage
 *.tsbuildinfo
 next-env.d.ts
 .tmp
-db/state.dev.json
+db/keynesian-beauty-contest.dev.db
+db/keynesian-beauty-contest.dev.db-shm
+db/keynesian-beauty-contest.dev.db-wal

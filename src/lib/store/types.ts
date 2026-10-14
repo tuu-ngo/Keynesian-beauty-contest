@@ -1,8 +1,8 @@
 import type { Game } from "@/lib/game";
 
 /**
- * Persistence boundary. Game logic never touches Redis directly, so the backend
- * can be swapped without changing the rules.
+ * Persistence boundary. Game logic never touches the SQLite/libSQL driver
+ * directly, so the backend can be swapped without changing the rules.
  */
 export interface Store {
   getGame(code: string): Promise<Game | null>;
