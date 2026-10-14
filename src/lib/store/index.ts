@@ -1,17 +1,13 @@
-import { MemoryStore } from "./memory";
-import type { Store } from "./types";
+import { LibsqlStore } from "./libsql";
+import type { RoomStore } from "./room-types";
 
-export type { Store } from "./types";
+export type { RoomStore, SeedRoster } from "./room-types";
 
-const globalForStore = globalThis as unknown as { __store?: Store };
+const globalForStore = globalThis as unknown as { __store?: LibsqlStore };
 
-/**
- * Scaffold fallback only. M1 replaces it with the SQLite/libSQL repository
- * described in docs/specs/BACKEND.md.
- */
-export function getStore(): Store {
+export function getRoomStore(): RoomStore {
   if (!globalForStore.__store) {
-    globalForStore.__store = new MemoryStore();
+    globalForStore.__store = new LibsqlStore();
   }
   return globalForStore.__store;
 }

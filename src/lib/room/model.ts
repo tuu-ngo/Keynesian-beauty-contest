@@ -1,0 +1,619 @@
+import { randomUUID } from "crypto";
+import type {
+  Account,
+  HostCommand,
+  Participant,
+  Round,
+  RoundResult,
+  RoundSettings,
+  Team,
+} from "@/contracts";
+
+export type RunStatus = "LOBBY" | "ROUND_OPEN" | "ROUND_LOCKED" | "ROUND_REVEALED" | "FINISHED";
+export type RunPhase = "NORMAL" | "ESCALATION";
+
+export interface AccountSecret extends Account {
+  /** Server-only. Never pass this type to a projection or archive builder. */
+  password: string;
+}
+
+export interface InternalRound extends Round {
+  /** Server-only until the round has been revealed. Values are integer tenths. */
+  picks: Record<string, number>;
+  /** Rule 1 needs this audit field; it is intentionally not part of the public result. */
+  disqualifiedUsernames: string[];
+}
+
+export interface Run {
+  id: string;
+  number: number;
+  status: RunStatus;
+  phase: RunPhase;
+  escalationReason: "NASH" | "HOST" | null;
+  activeRules: Array<1 | 2>;
+  participants: Record<string, Participant>;
+  participationLocked: boolean;
+  settingsForNextRound: RoundSettings;
+  rounds: InternalRound[];
+  createdAt: string;
+  finishedAt: string | null;
+  archivedAt: string | null;
+}
+
+export interface PlayerSession {
+  tokenHash: string;
+  username: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+export interface CommandReceipt {
+  runId: string;
+  response: CommandResult;
+}
+
+export interface PickReceipt {
+  runId: string;
+  response: PickResult;
+}
+
+export interface RoomArchive {
+  runId: string;
+  runNumber: number;
+  endedAt: string;
+  reason: "FINISH" | "RESET";
+  expiresAt: string;
+  archive: PublicArchive;
+}
+
+export interface Room {
+  schemaVersion: 1;
+  code: string;
+  version: number;
+  teams: Team[];
+  accounts: AccountSecret[];
+  run: Run;
+  sessions: Record<string, PlayerSession>;
+  commandReceipts: Record<string, CommandReceipt>;
+  pickReceipts: Record<string, Record<string, PickReceipt>>;
+  archives: RoomArchive[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommandResult {
+  version: number;
+  status: RunStatus;
+  runId: string;
+}
+
+export interface PickResult {
+  acceptedVersion: number;
+  pick: number;
+}
+
+export interface PublicArchive {
+  schemaVersion: 1;
+  code: string;
+  run: PublicRun;
+  teams: Team[];
+  individualLeaderboard: LeaderboardRow[];
+  teamLeaderboard: TeamLeaderboardRow[];
+}
+
+export interface PublicRun {
+  id: string;
+  number: number;
+  status: RunStatus;
+  phase: RunPhase;
+  escalationReason: "NASH" | "HOST" | null;
+  activeRules: Array<1 | 2>;
+  participants: Participant[];
+  participationLocked: boolean;
+  settingsForNextRound: RoundSettings;
+  rounds: Array<Omit<InternalRound, "disqualifiedUsernames">>;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface LeaderboardRow {
+  username: string;
+  rank: number;
+  points: number;
+}
+
+export interface TeamLeaderboardRow {
+  teamId: string;
+  rank: number;
+  points: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
+  p: "0.8",
+  min: 0,
+  max: 100,
+  step: 0.1,
+  timerSeconds: 60,
+};
+
+export class RoomError extends Error {
+  constructor(public readonly code: string, message = code) {
+    super(message);
+    this.name = "RoomError";
+  }
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function iso(now: number): string {
+  return new Date(now).toISOString();
+}
+
+function currentRound(run: Run): InternalRound | null {
+  return run.rounds.at(-1) ?? null;
+}
+
+function activeParticipants(run: Run): Participant[] {
+  return Object.values(run.participants).filter((participant) => participant.status === "ACTIVE");
+}
+
+function activeUsernames(run: Run): string[] {
+  return activeParticipants(run).map((participant) => participant.username);
+}
+
+function deadline(settings: RoundSettings, now: number): string | null {
+  return settings.timerSeconds === null ? null : iso(now + settings.timerSeconds * 1000);
+}
+
+function factor(p: RoundSettings["p"]): readonly [bigint, bigint] {
+  switch (p) {
+    case "0.8": return [4n, 5n];
+    case "2/3": return [2n, 3n];
+    case "1/2": return [1n, 2n];
+  }
+}
+
+function decimal(numerator: bigint, denominator: bigint, digits = 10): string {
+  if (denominator === 0n) return "0";
+  const negative = numerator < 0n !== denominator < 0n;
+  let n = numerator < 0n ? -numerator : numerator;
+  const d = denominator < 0n ? -denominator : denominator;
+  const whole = n / d;
+  n %= d;
+  if (n === 0n) return `${negative ? "-" : ""}${whole}`;
+  let fraction = "";
+  for (let index = 0; index < digits && n !== 0n; index += 1) {
+    n *= 10n;
+    fraction += (n / d).toString();
+    n %= d;
+  }
+  fraction = fraction.replace(/0+$/, "");
+  return `${negative ? "-" : ""}${whole}.${fraction}`;
+}
+
+function exactTenths(value: number): number | null {
+  if (!Number.isFinite(value) || value < 0 || value > 100) return null;
+  const tenths = Math.round(value * 10);
+  return Math.abs(value * 10 - tenths) < 1e-8 ? tenths : null;
+}
+
+function rank<T extends { points: number }>(rows: T[]): Array<T & { rank: number }> {
+  const sorted = [...rows].sort((left, right) => right.points - left.points);
+  let lastPoints: number | undefined;
+  let lastRank = 0;
+  return sorted.map((row, index) => {
+    if (row.points !== lastPoints) lastRank = index + 1;
+    lastPoints = row.points;
+    return { ...row, rank: lastRank };
+  });
+}
+
+export function individualLeaderboard(run: Run): LeaderboardRow[] {
+  return rank(Object.values(run.participants).map((participant) => ({ username: participant.username, points: participant.totalPoints })))
+    .map(({ username, points, rank: position }) => ({ username, points, rank: position }));
+}
+
+export function teamLeaderboard(room: Pick<Room, "teams" | "run">): TeamLeaderboardRow[] {
+  const points = new Map(room.teams.map((team) => [team.id, 0]));
+  for (const participant of Object.values(room.run.participants)) {
+    points.set(participant.teamId, (points.get(participant.teamId) ?? 0) + participant.totalPoints);
+  }
+  return rank([...points].map(([teamId, total]) => ({ teamId, points: total })))
+    .map(({ teamId, points: total, rank: position }) => ({ teamId, points: total, rank: position }));
+}
+
+export function createRoom(args: { code: string; teams: Team[]; accounts: AccountSecret[]; now: number }): Room {
+  if (args.teams.length === 0 || args.accounts.length === 0) throw new RoomError("INVALID_ROSTER", "Roster must contain at least one team and one account.");
+  const teamIds = new Set(args.teams.map((team) => team.id));
+  const usernames = new Set<string>();
+  for (const account of args.accounts) {
+    if (!teamIds.has(account.teamId)) throw new RoomError("INVALID_ROSTER", `Unknown team for ${account.username}.`);
+    const canonical = account.username.trim().toLowerCase();
+    if (usernames.has(canonical)) throw new RoomError("INVALID_ROSTER", "Usernames must be unique regardless of case.");
+    usernames.add(canonical);
+  }
+  const timestamp = iso(args.now);
+  return {
+    schemaVersion: 1,
+    code: args.code,
+    version: 0,
+    teams: clone(args.teams),
+    accounts: args.accounts.map((account) => ({ ...account, username: account.username.trim().toLowerCase() })),
+    run: newRun(1, args.now),
+    sessions: {},
+    commandReceipts: {},
+    pickReceipts: {},
+    archives: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function newRun(number: number, now: number): Run {
+  return {
+    id: randomUUID(),
+    number,
+    status: "LOBBY",
+    phase: "NORMAL",
+    escalationReason: null,
+    activeRules: [],
+    participants: {},
+    participationLocked: false,
+    settingsForNextRound: clone(DEFAULT_ROUND_SETTINGS),
+    rounds: [],
+    createdAt: iso(now),
+    finishedAt: null,
+    archivedAt: null,
+  };
+}
+
+export function purgeExpiredArchives(room: Room, now: number): Room {
+  const current = iso(now);
+  const expiredArchive = room.archives.some((archive) => archive.expiresAt <= current);
+  const expiredSession = Object.values(room.sessions).some((session) => session.expiresAt <= current || session.revokedAt !== null);
+  if (!expiredArchive && !expiredSession) return room;
+  const next = clone(room);
+  if (expiredArchive) next.archives = next.archives.filter((archive) => archive.expiresAt > current);
+  if (expiredSession) {
+    for (const [hash, session] of Object.entries(next.sessions)) {
+      if (session.expiresAt <= current || session.revokedAt !== null) delete next.sessions[hash];
+    }
+  }
+  return next;
+}
+
+export function resolveDeadline(room: Room, now: number): Room {
+  const round = currentRound(room.run);
+  if (room.run.status !== "ROUND_OPEN" || !round?.deadlineAt || round.deadlineAt > iso(now)) return room;
+  const next = clone(room);
+  next.run.status = "ROUND_LOCKED";
+  const nextRound = currentRound(next.run)!;
+  nextRound.lockedAt = iso(now);
+  return next;
+}
+
+export function joinRun(room: Room, username: string, runId: string, now: number): { room: Room; joined: boolean } {
+  if (room.run.id !== runId) throw new RoomError("RUN_MISMATCH");
+  const existing = room.run.participants[username];
+  if (existing) return { room, joined: false };
+  if (room.run.status !== "LOBBY" || room.run.participationLocked) throw new RoomError("INVALID_TRANSITION", "Participation is locked for this run.");
+  const account = room.accounts.find((candidate) => candidate.username === username);
+  if (!account) throw new RoomError("FORBIDDEN");
+  const next = clone(room);
+  next.run.participants[username] = {
+    username: account.username,
+    displayName: account.displayName,
+    teamId: account.teamId,
+    joinedAt: iso(now),
+    status: "ACTIVE",
+    eliminatedInRound: null,
+    totalPoints: 0,
+  };
+  return { room: next, joined: true };
+}
+
+function ensureVersion(room: Room, command: HostCommand): CommandResult | null {
+  const receipt = room.commandReceipts[command.commandId];
+  if (receipt) return receipt.response;
+  if (command.expectedVersion !== room.version) throw new RoomError("VERSION_CONFLICT", "State changed; refresh and retry.");
+  return null;
+}
+
+function score(round: InternalRound, run: Run): RoundResult {
+  const entries = Object.entries(round.picks).filter(([username]) => run.participants[username]?.status === "ACTIVE");
+  if (entries.length === 0) {
+    round.disqualifiedUsernames = [];
+    return { average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null, eliminationCandidates: [], pointsByUsername: {} };
+  }
+  const sum = entries.reduce((total, [, value]) => total + value, 0);
+  const numberOfPicks = BigInt(entries.length);
+  const [factorNumerator, factorDenominator] = factor(round.settings.p);
+  // Values are integer tenths. The target numerator uses those same units.
+  const targetNumerator = factorNumerator * BigInt(sum);
+  const targetDenominator = factorDenominator * numberOfPicks;
+  const distances = new Map(entries.map(([username, value]) => [username, value < 0 ? 0n : (BigInt(value) * targetDenominator - targetNumerator < 0n ? -(BigInt(value) * targetDenominator - targetNumerator) : BigInt(value) * targetDenominator - targetNumerator)]));
+
+  const duplicateGroups = new Map<number, string[]>();
+  for (const [username, value] of entries) {
+    const group = duplicateGroups.get(value) ?? [];
+    group.push(username);
+    duplicateGroups.set(value, group);
+  }
+  const ruleOne = run.activeRules.includes(1);
+  const disqualified = ruleOne ? [...duplicateGroups.values()].filter((group) => group.length > 1).flat() : [];
+  const disqualifiedSet = new Set(disqualified);
+  const eligible = entries.filter(([username]) => !disqualifiedSet.has(username));
+
+  let winners: string[] = [];
+  const ruleTwo = run.activeRules.includes(2);
+  const containsZero = entries.some(([, value]) => value === 0);
+  const maxPickers = eligible.filter(([, value]) => value === 1000).map(([username]) => username);
+  if (ruleTwo && containsZero && maxPickers.length === 1) {
+    winners = maxPickers;
+  } else if (eligible.length > 0) {
+    let smallest: bigint | null = null;
+    for (const [username] of eligible) {
+      const distance = distances.get(username)!;
+      if (smallest === null || distance < smallest) smallest = distance;
+    }
+    winners = eligible.filter(([username]) => distances.get(username) === smallest).map(([username]) => username);
+  }
+  round.disqualifiedUsernames = disqualified;
+  const pointsByUsername = Object.fromEntries(winners.map((username) => [username, 10]));
+  return {
+    average: decimal(BigInt(sum), numberOfPicks * 10n),
+    target: decimal(targetNumerator, targetDenominator * 10n),
+    winners,
+    eliminatedUsername: null,
+    eliminationSeed: null,
+    eliminationCandidates: [],
+    pointsByUsername,
+  };
+}
+
+function seededIndex(seed: string, count: number): number {
+  // FNV-1a is deterministic and is only used after the cryptographically random
+  // seed has been persisted. It is not used to generate the seed itself.
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % count;
+}
+
+function eliminate(room: Room, round: InternalRound, seed: string): void {
+  const run = room.run;
+  const result = round.result!;
+  const winners = new Set(result.winners);
+  const active = activeUsernames(run);
+  const submitted = new Set(Object.keys(round.picks));
+  const disqualified = new Set(round.disqualifiedUsernames);
+  const groups = [
+    active.filter((username) => !submitted.has(username) && !winners.has(username)),
+    active.filter((username) => submitted.has(username) && disqualified.has(username) && !winners.has(username)),
+    active.filter((username) => submitted.has(username) && !disqualified.has(username) && !winners.has(username)),
+  ];
+  const candidates = groups.find((group) => group.length > 0) ?? [];
+  if (candidates.length === 0) return;
+  // Exact distance is only needed to choose among submitters. Recreate it from
+  // the immutable round settings/picks without using floating point values.
+  const submittedEntries = Object.entries(round.picks).filter(([username]) => run.participants[username]?.status === "ACTIVE");
+  let finalists = candidates;
+  if (submittedEntries.length > 0 && candidates.every((username) => submitted.has(username))) {
+    const sum = submittedEntries.reduce((total, [, value]) => total + value, 0);
+    const [numerator, denominator] = factor(round.settings.p);
+    const targetNumerator = numerator * BigInt(sum);
+    const targetDenominator = denominator * BigInt(submittedEntries.length);
+    const distances = new Map(submittedEntries.map(([username, value]) => {
+      const distance = BigInt(value) * targetDenominator - targetNumerator;
+      return [username, distance < 0n ? -distance : distance];
+    }));
+    let largest = -1n;
+    for (const username of candidates) {
+      const distance = distances.get(username) ?? 0n;
+      if (distance > largest) largest = distance;
+    }
+    finalists = candidates.filter((username) => (distances.get(username) ?? 0n) === largest);
+  }
+  finalists.sort();
+  const eliminated = finalists[seededIndex(seed, finalists.length)];
+  result.eliminationSeed = seed;
+  result.eliminationCandidates = finalists;
+  result.eliminatedUsername = eliminated;
+  run.participants[eliminated].status = "ELIMINATED";
+  run.participants[eliminated].eliminatedInRound = round.number;
+}
+
+function archive(room: Room, reason: "FINISH" | "RESET", now: number): void {
+  if (room.run.archivedAt !== null || room.run.rounds.length === 0) return;
+  const timestamp = iso(now);
+  room.run.archivedAt = timestamp;
+  room.archives.push({
+    runId: room.run.id,
+    runNumber: room.run.number,
+    endedAt: timestamp,
+    reason,
+    expiresAt: iso(now + 7 * DAY_MS),
+    archive: publicArchive(room),
+  });
+}
+
+export function applyCommand(room: Room, command: HostCommand, now: number, seed: string): { room: Room; result: CommandResult; changed: boolean } {
+  const existing = ensureVersion(room, command);
+  if (existing) return { room, result: existing, changed: false };
+  const next = resolveDeadline(clone(room), now);
+  let changed = next !== room;
+  const run = next.run;
+  switch (command.type) {
+    case "OPEN_ROUND": {
+      if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
+      if (activeParticipants(run).length < 2) throw new RoomError("INVALID_TRANSITION", "At least two participants are required.");
+      run.participationLocked = true;
+      const settings = clone(run.settingsForNextRound);
+      const openedAt = iso(now);
+      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), lockedAt: null, revealedAt: null, result: null, picks: {}, disqualifiedUsernames: [] });
+      run.status = "ROUND_OPEN";
+      changed = true;
+      break;
+    }
+    case "LOCK_ROUND": {
+      if (run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION");
+      run.status = "ROUND_LOCKED";
+      currentRound(run)!.lockedAt = iso(now);
+      changed = true;
+      break;
+    }
+    case "REVEAL_ROUND": {
+      if (run.status !== "ROUND_LOCKED") throw new RoomError("INVALID_TRANSITION");
+      const round = currentRound(run)!;
+      round.result = score(round, run);
+      for (const [username, points] of Object.entries(round.result.pointsByUsername)) run.participants[username].totalPoints += points;
+      if (run.phase === "NORMAL") {
+        const active = activeUsernames(run);
+        if (active.length >= 2 && active.every((username) => round.picks[username] === 0)) {
+          run.phase = "ESCALATION";
+          run.escalationReason = "NASH";
+          run.activeRules = [1];
+        }
+      } else {
+        eliminate(next, round, seed);
+        if (round.result.eliminatedUsername && !run.activeRules.includes(2)) run.activeRules.push(2);
+        round.revealedAt = iso(now);
+        if (activeParticipants(run).length <= 1) {
+          run.status = "FINISHED";
+          run.finishedAt = iso(now);
+          archive(next, "FINISH", now);
+        }
+      }
+      round.revealedAt ??= iso(now);
+      if (run.status !== "FINISHED") run.status = "ROUND_REVEALED";
+      changed = true;
+      break;
+    }
+    case "START_ESCALATION": {
+      if (run.status !== "ROUND_REVEALED" || run.phase !== "NORMAL") throw new RoomError("INVALID_TRANSITION");
+      run.phase = "ESCALATION";
+      run.escalationReason = "HOST";
+      run.activeRules = [1];
+      changed = true;
+      break;
+    }
+    case "UPDATE_SETTINGS": {
+      if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
+      run.settingsForNextRound = { ...run.settingsForNextRound, ...command.payload };
+      changed = true;
+      break;
+    }
+    case "FINISH": {
+      if (run.status === "FINISHED") throw new RoomError("INVALID_TRANSITION");
+      run.status = "FINISHED";
+      run.finishedAt = iso(now);
+      archive(next, "FINISH", now);
+      changed = true;
+      break;
+    }
+    case "RESET": {
+      archive(next, "RESET", now);
+      next.run = newRun(run.number + 1, now);
+      changed = true;
+      break;
+    }
+  }
+  if (changed) {
+    next.version += 1;
+    next.updatedAt = iso(now);
+  }
+  const result = { version: next.version, status: next.run.status, runId: next.run.id };
+  next.commandReceipts[command.commandId] = { runId: next.run.id, response: result };
+  return { room: next, result, changed };
+}
+
+export function submitPick(room: Room, args: { username: string; runId: string; round: number; value: number; requestId: string; now: number }): { room: Room; result: PickResult; changed: boolean } {
+  const duplicate = room.pickReceipts[args.username]?.[args.requestId];
+  if (duplicate) {
+    if (duplicate.runId !== args.runId) throw new RoomError("RUN_MISMATCH", "This request id belongs to an earlier run.");
+    return { room, result: duplicate.response, changed: false };
+  }
+  const next = resolveDeadline(clone(room), args.now);
+  if (next.run.id !== args.runId) throw new RoomError("RUN_MISMATCH");
+  if (next.run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION", "This round is not open.");
+  const round = currentRound(next.run);
+  const participant = next.run.participants[args.username];
+  if (!round || round.number !== args.round) throw new RoomError("RUN_MISMATCH", "This is not the current round.");
+  if (!participant || participant.status !== "ACTIVE") throw new RoomError("FORBIDDEN", "Only active participants may submit a pick.");
+  const valueTenths = exactTenths(args.value);
+  if (valueTenths === null) throw new RoomError("VALIDATION_ERROR", "Pick must be between 0 and 100 in increments of 0.1.");
+  round.picks[args.username] = valueTenths;
+  next.version += 1;
+  next.updatedAt = iso(args.now);
+  const result = { acceptedVersion: next.version, pick: valueTenths };
+  (next.pickReceipts[args.username] ??= {})[args.requestId] = { runId: args.runId, response: result };
+  return { room: next, result, changed: true };
+}
+
+export function publicArchive(room: Room): PublicArchive {
+  const run = room.run;
+  return {
+    schemaVersion: 1,
+    code: room.code,
+    run: {
+      id: run.id,
+      number: run.number,
+      status: run.status,
+      phase: run.phase,
+      escalationReason: run.escalationReason,
+      activeRules: clone(run.activeRules),
+      participants: Object.values(run.participants).map(clone),
+      participationLocked: run.participationLocked,
+      settingsForNextRound: clone(run.settingsForNextRound),
+      rounds: run.rounds.map(({ disqualifiedUsernames, ...round }) => {
+        void disqualifiedUsernames;
+        return clone(round);
+      }),
+      createdAt: run.createdAt,
+      finishedAt: run.finishedAt,
+    },
+    teams: clone(room.teams),
+    individualLeaderboard: individualLeaderboard(run),
+    teamLeaderboard: teamLeaderboard(room),
+  };
+}
+
+export function csvForArchive(archive: PublicArchive): string {
+  const escape = (value: string | number | boolean | null | undefined): string => {
+    const text = value === null || value === undefined ? "" : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  const rows = [["runId", "round", "username", "displayName", "teamId", "pick", "distance", "points", "winner", "eliminated"]];
+  for (const round of archive.run.rounds.filter((candidate) => candidate.result !== null)) {
+    const result = round.result!;
+    const submitted = Object.values(round.picks);
+    const sum = submitted.reduce((total, value) => total + value, 0);
+    const [factorNumerator, factorDenominator] = factor(round.settings.p);
+    const targetNumerator = factorNumerator * BigInt(sum);
+    const targetDenominator = factorDenominator * BigInt(submitted.length || 1);
+    for (const participant of archive.run.participants) {
+      const pick = round.picks[participant.username];
+      const rawDistance = pick === undefined || result.target === null ? null : BigInt(pick) * targetDenominator - targetNumerator;
+      const distance = rawDistance === null ? null : decimal(rawDistance < 0n ? -rawDistance : rawDistance, targetDenominator * 10n);
+      rows.push([
+        archive.run.id,
+        String(round.number),
+        participant.username,
+        participant.displayName,
+        participant.teamId,
+        pick === undefined ? "" : String(pick / 10),
+        distance ?? "",
+        String(result.pointsByUsername[participant.username] ?? 0),
+        String(result.winners.includes(participant.username)),
+        String(result.eliminatedUsername === participant.username),
+      ]);
+    }
+  }
+  return rows.map((row) => row.map(escape).join(",")).join("\r\n");
+}

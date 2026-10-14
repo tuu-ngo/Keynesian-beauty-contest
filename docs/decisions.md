@@ -15,7 +15,7 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 
 ## Dữ liệu và vận hành
 
-- `db/seed.sql` là dữ liệu đầu vào có thể sửa/chạy trước khi tạo room. Nó chứa `seed_teams` và `seed_users`; Host tạo room sẽ snapshot roster này, nên sửa seed sau đó không đổi room hiện có. Người chơi đăng nhập bằng `username` và `password` đơn giản; `displayName` tùy chọn, mặc định bằng `username`. Mỗi người có `teamId`. Team có `id`, `name`, `image?`, `color?`. Không bắt buộc đúng 50 người, 5 đội hay chia đều 10 người/đội; phải kiểm tra ID và tham chiếu hợp lệ.
+- `db/seed.sql` chứa schema và roster có thể sửa. Chạy `npm run seed-db` trước khi tạo room. Host tạo room sẽ snapshot roster này, nên sửa seed sau đó không đổi room hiện có. Người chơi đăng nhập bằng `username` và `password` đơn giản; `displayName` tùy chọn, mặc định bằng `username`. Mỗi người có `teamId`. Team có `id`, `name`, `image?`, `color?`. Không bắt buộc đúng 50 người, 5 đội hay chia đều 10 người/đội; phải kiểm tra ID và tham chiếu hợp lệ.
 - Chỉ có một tài khoản Host, khai báo trong `.env` ở dev và Environment Variables của Vercel ở production. Các thao tác tạo room, điều khiển và reset cần phiên Host hợp lệ.
 - Production lưu trạng thái sống trong **Turso/libSQL** (SQLite-compatible, remote qua HTTP) được kết nối với Vercel. Không dùng file SQLite cục bộ trong Vercel Function vì filesystem của Function không bền vững và không được chia sẻ giữa các instance. Dev dùng file SQLite cục bộ `db/keynesian-beauty-contest.dev.db`; file này không commit nhưng được giữ qua lần khởi động lại dev server.
 - Client polling trạng thái mỗi 1 giây qua API có `version`/`ETag`; không dùng WebSocket cho MVP. Portal và Host luôn polling khi mở; Player có thể tạm dừng khi tab ẩn và đồng bộ lại khi hiện.

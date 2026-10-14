@@ -19,7 +19,8 @@
 ## 2. Seed roster SQL ở `db/`
 
 [`db/seed.sql`](../db/seed.sql) tạo hai bảng source `seed_teams` và
-`seed_users`, đồng thời là nơi Host điền roster trước lần tạo room đầu tiên.
+`seed_users`, đồng thời chứa roster. Chạy `npm run seed-db` trước lần tạo room
+đầu tiên.
 Một team có `id`, `name`, `image?`, `color?`; một user có `username`,
 `password`, `display_name?`, `team_id`. `display_name` được map sang
 `displayName` trong contract TypeScript.

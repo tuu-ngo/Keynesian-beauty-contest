@@ -36,7 +36,7 @@ M1a–M1d là bốn luồng triển khai độc lập **sau** khi M0 được me
 ### M0 — Khóa contract
 
 1. Dùng scaffold Next.js App Router + TypeScript + Tailwind 4 + npm + Vitest đã có trên `main`; điều chỉnh các type/store sơ khai theo contract v1 trước khi chia nhánh.
-2. Tạo/chạy `db/seed.sql` từ dữ liệu team/user do Host điền. Runtime chỉ đọc roster source ở server và snapshot roster vào room khi tạo.
+2. Tạo/chạy `db/seed.sql` bằng `npm run seed-db`. Runtime chỉ đọc roster source ở server và snapshot roster vào room khi tạo.
 3. Khai báo schema `TeamSeed`, `UserSeed`, `RoomState`, `Round`, `RoundResult`, `Command`, `Projection`, `ApiError`; cố định SQL seed, API examples và version `v1`.
 4. Quyết định bảng lỗi HTTP cụ thể: 400 schema, 401 chưa xác thực, 403 sai quyền, 404 room/run, 409 trạng thái/version, 429 rate limit.
 5. Chốt các fixture cho LOBBY, OPEN, LOCKED, REVEALED, NASH, ESCALATION, FINISHED và archive. Đây là dữ liệu dùng chung cho các UI trong khi backend đang xây.
