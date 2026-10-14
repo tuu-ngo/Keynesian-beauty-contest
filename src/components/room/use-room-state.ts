@@ -50,11 +50,14 @@ export function useRoomState<V extends View>({ code, view, playerToken, pauseWhe
     const controller = new AbortController();
     inFlight.current = controller;
     const key = cacheKey(active.code, active.view, active.playerToken);
+    // Only revalidate when this mount already holds data. The ETag cache outlives
+    // the component, so a remount would otherwise get a 304 and never render.
+    const cachedTag = dataRef.current ? etags.get(key) : undefined;
     try {
       const response = await fetch(stateUrl(active.code, active.view), {
         headers: {
           ...authHeaders(active.view === "player" ? active.playerToken : null),
-          ...(etags.get(key) ? { "If-None-Match": etags.get(key)! } : {}),
+          ...(cachedTag ? { "If-None-Match": cachedTag } : {}),
         },
         cache: "no-store",
         signal: controller.signal,
@@ -77,7 +80,7 @@ export function useRoomState<V extends View>({ code, view, playerToken, pauseWhe
       dataRef.current = next;
       setData(next);
       const tag = response.headers.get("ETag");
-      if (tag) etags.set(`${active.code.toUpperCase()}:${active.view}:${active.playerToken ?? "anonymous"}`, tag);
+      if (tag) etags.set(key, tag);
       setConnection("live");
       setError(null);
       setLastUpdatedAt(Date.now());

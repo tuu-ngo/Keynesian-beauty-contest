@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stateResponseSchema, type HostCommand } from "@/contracts";
-import { applyCommand, createRoom, project, submitPick, type Room } from "@/lib/room";
+import { applyCommand, createRoom, project, publicArchive, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
 
@@ -140,5 +140,40 @@ describe("room model", () => {
     expect(state.players.find((player) => player.username === "ada")?.finalPlacement).toBe(1);
     expect(state.players.find((player) => player.username === "bea")?.finalPlacement).toBe(2);
     expect(state.players.find((player) => player.username === "cy")?.finalPlacement).toBe(2);
+  });
+
+  it("publishes the saved next-round settings before the round opens", () => {
+    let game = joinAll(room());
+    game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { p: "2/3", timerSeconds: null } }, NOW, "seed").room;
+    const lobby = project(game, "public", NOW);
+    expect(stateResponseSchema.safeParse(lobby).success).toBe(true);
+    expect(lobby.currentRound).toBeNull();
+    expect(lobby.nextRoundSettings).toMatchObject({ p: "2/3", timerSeconds: null });
+  });
+
+  it("hides open-round picks from a live Host export until the round locks", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 12.3, requestId: crypto.randomUUID(), now: NOW }).room;
+    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({});
+    game = command(game, "LOCK_ROUND").room;
+    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 123 });
+  });
+
+  it("drops stale pick and command receipts so the snapshot does not grow all game", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    const requestId = crypto.randomUUID();
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, requestId, now: NOW }).room;
+    expect(submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, requestId, now: NOW }).changed).toBe(false);
+    game = command(game, "LOCK_ROUND").room;
+    game = command(game, "REVEAL_ROUND").room;
+    game = command(game, "OPEN_ROUND").room;
+    expect(game.pickReceipts).toEqual({});
+
+    const reset: HostCommand = { type: "RESET", commandId: crypto.randomUUID(), expectedVersion: game.version };
+    const first = applyCommand(game, reset, NOW, "seed");
+    expect(Object.keys(first.room.commandReceipts)).toEqual([reset.commandId]);
+    expect(applyCommand(first.room, reset, NOW + 1, "seed").room).toBe(first.room);
   });
 });

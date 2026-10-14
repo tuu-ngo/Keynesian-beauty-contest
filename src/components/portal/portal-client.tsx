@@ -53,7 +53,7 @@ function JoinQr({ code }: { code: string }) {
 }
 
 function Lobby({ game }: { game: PublicProjection }) {
-  const p = game.currentRound?.settings.p ?? "0.8";
+  const p = game.nextRoundSettings.p;
   return <section className="portal-stage portal-lobby"><div className="lobby-copy"><p className="eyeline">The room is gathering</p><h1>Scan to <mark>join</mark>.</h1><p>Scan to sign in with your roster account.</p><p className="portal-code" aria-label={`Game code ${game.code}`}>{game.code}</p><p className="rule-copy">{ruleSentence(p)}</p><p>The host will open the first round when everyone is ready.</p></div><JoinQr code={game.code} /><RosterWall game={game} /></section>;
 }
 

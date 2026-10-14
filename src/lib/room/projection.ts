@@ -46,6 +46,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       finalPlacement: finalPlacement(room, participant.username),
     })),
     currentRound: round ? { number: round.number, settings: round.settings, deadlineAt: isOpen ? round.deadlineAt : null } : null,
+    nextRoundSettings: room.run.settingsForNextRound,
     submittedCount: hasCurrentSubmissions ? active.filter((participant) => round.picks[participant.username] !== undefined).length : 0,
     activeCount: active.length,
     revealedRounds: room.run.rounds.filter((candidate) => candidate.result !== null).map((candidate) => ({

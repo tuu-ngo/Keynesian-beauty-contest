@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const room = await currentRoomForRead();
   if (!room) return apiError("ROOM_NOT_FOUND", "Room not found.");
   const requestedRun = request.nextUrl.searchParams.get("runId") ?? room.run.id;
-  const archive = requestedRun === room.run.id ? publicArchive(room) : room.archives.find((candidate) => candidate.runId === requestedRun)?.archive;
+  const archive = requestedRun === room.run.id ? publicArchive(room, { hideOpenRoundPicks: true }) : room.archives.find((candidate) => candidate.runId === requestedRun)?.archive;
   if (!archive) return apiError("RUN_NOT_FOUND", "Run is not available for export.");
   if (format === "csv") {
     return new NextResponse(csvForArchive(archive), {

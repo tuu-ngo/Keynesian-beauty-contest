@@ -15,7 +15,12 @@ afterAll(() => {
   store.close();
   if (previousUrl === undefined) delete process.env.TURSO_DATABASE_URL;
   else process.env.TURSO_DATABASE_URL = previousUrl;
-  rmSync(directory, { recursive: true, force: true });
+  // Windows can keep SQLite WAL handles open briefly after close(); temp cleanup is best-effort.
+  try {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    // The OS temp directory is cleaned up eventually; never fail the suite on cleanup.
+  }
 });
 
 describe("libSQL room store", () => {

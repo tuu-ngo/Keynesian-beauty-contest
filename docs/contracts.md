@@ -112,6 +112,7 @@ type PublicFields = {
   escalationReason: 'NASH' | 'HOST' | null; activeRules: RuleId[];
   teams: Team[]; players: PublicPlayer[];
   currentRound: { number: number; settings: RoundSettings; deadlineAt: string | null } | null;
+  nextRoundSettings: RoundSettings; // what OPEN_ROUND will snapshot; shown in the lobby and Host settings form
   submittedCount: number; activeCount: number; revealedRounds: RevealedRound[];
   individualLeaderboard: { username: string; rank: number; points: number }[];
   teamLeaderboard: { teamId: string; rank: number; points: number }[];

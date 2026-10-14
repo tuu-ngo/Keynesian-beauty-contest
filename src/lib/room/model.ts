@@ -454,6 +454,9 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
       if (activeParticipants(run).length < 2) throw new RoomError("INVALID_TRANSITION", "At least two participants are required.");
       run.participationLocked = true;
+      // Pick receipts only make retries of the open round idempotent. Dropping
+      // earlier rounds' receipts keeps the persisted snapshot from growing all game.
+      next.pickReceipts = {};
       const settings = clone(run.settingsForNextRound);
       const openedAt = iso(now);
       run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), lockedAt: null, revealedAt: null, result: null, picks: {}, disqualifiedUsernames: [] });
@@ -520,6 +523,10 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
     case "RESET": {
       archive(next, "RESET", now);
       next.run = newRun(run.number + 1, now);
+      // Receipts from the finished run can no longer apply; this command's own
+      // receipt is recorded below so a retried RESET stays idempotent.
+      next.commandReceipts = {};
+      next.pickReceipts = {};
       changed = true;
       break;
     }
@@ -556,8 +563,11 @@ export function submitPick(room: Room, args: { username: string; runId: string; 
   return { room: next, result, changed: true };
 }
 
-export function publicArchive(room: Room): PublicArchive {
+export function publicArchive(room: Room, options: { hideOpenRoundPicks?: boolean } = {}): PublicArchive {
   const run = room.run;
+  // The Host may only see other players' picks once a round is locked. A live
+  // export taken while a round is open must not reveal its picks early.
+  const hiddenRound = options.hideOpenRoundPicks && run.status === "ROUND_OPEN" ? currentRound(run)?.number : undefined;
   return {
     schemaVersion: 1,
     code: room.code,
@@ -573,7 +583,7 @@ export function publicArchive(room: Room): PublicArchive {
       settingsForNextRound: clone(run.settingsForNextRound),
       rounds: run.rounds.map(({ disqualifiedUsernames, ...round }) => {
         void disqualifiedUsernames;
-        return clone(round);
+        return round.number === hiddenRound ? { ...clone(round), picks: {} } : clone(round);
       }),
       createdAt: run.createdAt,
       finishedAt: run.finishedAt,

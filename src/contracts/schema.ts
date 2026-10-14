@@ -107,6 +107,7 @@ export const publicProjectionSchema = z.object({
   teams: z.array(teamSchema),
   players: z.array(publicPlayerSchema),
   currentRound: z.object({ number: z.number().int().positive(), settings: roundSettingsSchema, deadlineAt: z.string().datetime().nullable() }).strict().nullable(),
+  nextRoundSettings: roundSettingsSchema,
   submittedCount: z.number().int().nonnegative(),
   activeCount: z.number().int().nonnegative(),
   revealedRounds: z.array(revealedRoundSchema),

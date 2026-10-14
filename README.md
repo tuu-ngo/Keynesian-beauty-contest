@@ -184,7 +184,7 @@ Tính toán từ dữ liệu đã lưu:
 
 ### 4.2 Phương thức truyền tải thời gian thực
 MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ WebSocket ở Public Beta, nhưng mỗi kết nối vẫn bị giới hạn theo thời lượng Function và cần kho trạng thái chung. Vì vậy:
-- Client (Portal, Host, Player) **poll** `GET /api/games/[code]/state?role=…&v=<version>` mỗi **1 giây** (Portal/Host) và **2 giây** (Player), kèm `ETag` / version để trạng thái không đổi trả về `304` với chi phí thấp. Thêm jitter ±200 ms để tránh bão request với 200 người chơi.
+- Client (Portal, Host, Player) **poll** `GET /api/room/state?code=…&view=public|player|host` khoảng **1 giây** một lần (backoff tới 8 giây khi lỗi), kèm `ETag` để trạng thái không đổi trả về `304` với chi phí thấp. Thêm jitter 0–180 ms để tránh bão request.
 - Mỗi trò chơi có `version` tăng đơn điệu.
 - Tạm dừng polling khi tab bị ẩn (chỉ player; **không bao giờ tạm dừng Portal**).
 - Vai trò quyết định **projection** trạng thái mà server trả về (xem §4.4).
@@ -193,12 +193,16 @@ MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ 
 ### 4.3 API (tất cả JSON, dưới `/api`)
 | Phương thức & đường dẫn | Xác thực | Mục đích |
 |---------------|------|---------|
-| `POST /games` | không | Tạo trò chơi → `{ code, hostToken }` |
-| `POST /games/[code]/join` | không | `{ name }` → `{ playerToken }` |
-| `GET /games/[code]/state` | query role + token | Projection trạng thái theo vai trò |
-| `POST /games/[code]/pick` | player token | `{ round, value }` |
-| `POST /games/[code]/host/[action]` | host token | `open`, `lock`, `reveal`, `next`, `finish`, `reset`, `settings`, `kick` |
-| `GET /games/[code]/export` | host token | CSV / JSON |
+| `POST /host/login` · `POST /host/logout` · `GET /host/session` | cookie Host | Đăng nhập/đăng xuất Host bằng `HOST_USERNAME`/`HOST_PASSWORD` |
+| `GET /room` · `POST /room` | cookie Host | Lấy room hiện tại / tạo room duy nhất từ roster seed |
+| `GET /room/state?code=…&view=…` | public; player token; cookie Host | Projection trạng thái theo vai trò (`ETag`/`304`) |
+| `POST /room/login` | không | `{ code, username, password }` → `{ playerToken }` |
+| `POST /room/join` | player token | `{ runId }` — vào lobby của run mới sau RESET |
+| `PUT /room/pick` | player token | `{ runId, round, value, requestId }` |
+| `POST /room/command` | cookie Host | `OPEN_ROUND`, `LOCK_ROUND`, `REVEAL_ROUND`, `START_ESCALATION`, `UPDATE_SETTINGS`, `FINISH`, `RESET` |
+| `GET /room/export?runId=…&format=csv\|json` · `GET /room/archives` | cookie Host | Xuất run hiện tại hoặc archive còn hạn |
+
+Chi tiết request/response: [docs/contracts.md](docs/contracts.md).
 
 Portal chỉ cần mã trò chơi để truy cập (công khai, chỉ đọc và nhận projection an toàn cho khán giả).
 - Kiểm tra mọi body bằng trình xác thực schema (ví dụ Zod). Trả về lỗi có cấu trúc `{ error: { code, message } }`.
@@ -227,12 +231,13 @@ Test phải khẳng định response của Portal hoặc Player trong `ROUND_OPE
 .
 ├─ src/
 │  ├─ app/
-│  │  ├─ page.tsx                 # Màn hình tham gia
+│  │  ├─ page.tsx                 # Chuyển tới /login hoặc /play/[code]
+│  │  ├─ login/page.tsx           # Player đăng nhập
 │  │  ├─ play/[code]/page.tsx     # Player
-│  │  ├─ host/page.tsx            # Tạo trò chơi
+│  │  ├─ host/page.tsx            # Host đăng nhập / tạo room
 │  │  ├─ host/[code]/page.tsx     # Console người dẫn
 │  │  ├─ portal/[code]/page.tsx   # Màn hình trình chiếu
-│  │  └─ api/games/...            # Route handler (§4.3)
+│  │  └─ api/room/..., api/host/... # Route handler (§4.3)
 │  ├─ lib/
 │  │  ├─ game/                    # Logic thuần: state machine, scoring, levelK
 │  │  ├─ store/                   # Store interface + SQLite/libSQL repository và migrations

@@ -84,9 +84,10 @@ export function HostClient({ code }: { code: string }) {
 }
 
 function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy: boolean; onSave: (payload: { p?: "0.8" | "2/3" | "1/2"; timerSeconds?: number | null }) => Promise<void> }) {
-  const [p, setP] = useState(game.currentRound?.settings.p ?? "0.8");
-  const [timer, setTimer] = useState<string>(String(game.currentRound?.settings.timerSeconds ?? 60));
-  useEffect(() => { setP(game.currentRound?.settings.p ?? "0.8"); setTimer(String(game.currentRound?.settings.timerSeconds ?? 60)); }, [game.currentRound?.settings.p, game.currentRound?.settings.timerSeconds]);
+  const saved = game.nextRoundSettings;
+  const [p, setP] = useState(saved.p);
+  const [timer, setTimer] = useState<string>(saved.timerSeconds === null ? "off" : String(saved.timerSeconds));
+  useEffect(() => { setP(saved.p); setTimer(saved.timerSeconds === null ? "off" : String(saved.timerSeconds)); }, [saved.p, saved.timerSeconds]);
   function submit(event: FormEvent) { event.preventDefault(); const parsed = timer === "off" ? null : Number(timer); void onSave({ p, timerSeconds: Number.isFinite(parsed) ? parsed : null }); }
   return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="off">Off</option></select></label><p>Changes apply to the next round. The open round keeps its saved settings.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
 }
