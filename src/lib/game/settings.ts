@@ -10,8 +10,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   allowChangeUntilLock: true,
   showNamesOnReveal: false,
   pointsForWin: 10,
-  closeCallBonus: 0,
-  maxPlayers: 200,
+  closeCallBonus: 0,  maxPlayers: 200,
   escalationEnabled: true,
   ruleList: [1, 2],
 };
