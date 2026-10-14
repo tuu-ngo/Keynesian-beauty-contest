@@ -124,7 +124,7 @@ LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED → (ROUND_OPEN | FINIS
 - Transitions are triggered only by the host (or by the timer expiring for `ROUND_OPEN → ROUND_LOCKED`, evaluated server-side).
 - Server is the single source of truth. Clients never compute results.
 - All transitions are idempotent (repeated host clicks must not double-advance).
-- Game also carries `phase: NORMAL | ESCALATION`, `activeRules: number[]`, and per-player `status: ACTIVE | ELIMINATED` (with `eliminatedInRound`). On `ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED` the server evaluates, in order: round result (§3.2 with rules), Nash trigger (if `NORMAL`), elimination (if `ESCALATION`) and rule activation. The `FINISHED` state is also entered automatically when one active player remains.
+- Game also carries `phase: NORMAL | ESCALATION`, `activeRules: number[]`, and per-player `status: ACTIVE | ELIMINATED` (with `eliminatedInRound`). On `ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED` the server evaluates, in order: round result (§3.2 with rules), Nash trigger (if `NORMAL`), elimination (if `ESCALATION`) and rule activation. `FINISHED` is entered via the host "next" (`advance`) after the reveal that leaves one active player, so the Portal can still show the final elimination first.
 - Only `ACTIVE` players may submit picks and are counted in "N / M submitted".
 
 ### 3.2 Scoring and winner rules
