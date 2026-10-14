@@ -52,37 +52,38 @@ This is an operational game interface, not a marketing site. The frontend applie
 
 ### Theme and tokens
 
-Use CSS custom properties for a single semantic token system. Respect `prefers-color-scheme` and provide an in-app theme toggle only if testing shows the Portal needs a fixed presentation theme. The page remains in one theme at a time. Do not invert arbitrary sections.
+The UI uses a **neobrutalist** visual system (see `.claude/skills/neobrutalism-design`): flat saturated colour, one consistent 3px ink border on every surface, hard unblurred offset shadows pointing down-right, and heavy display type. Tokens live on `:root` in `src/app/globals.css` with an `--nb-` prefix. Respect `prefers-color-scheme`; `data-theme="light" | "dark"` on `<html>` forces a theme.
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
-| `--surface` | `#F6F8FB` | `#111827` | Application background |
-| `--surface-raised` | `#FFFFFF` | `#182235` | Forms, dialogs, important panels |
-| `--surface-subtle` | `#E8EEF4` | `#223047` | Selected or supporting surfaces |
-| `--text` | `#172033` | `#F1F5F9` | Primary text |
-| `--text-muted` | `#526174` | `#AAB8CA` | Supporting text |
-| `--border` | `#C9D4E0` | `#33445F` | Inputs and structural separators |
-| `--accent` | `#006B5D` | `#36C5A8` | Primary action, focus ring, selected state |
-| `--danger` | `#B42318` | `#FF8C82` | Destructive action and error state |
+| `--nb-bg` | `#FFFDF5` | `#1A1A1A` | Page background (with a faint dot grid) |
+| `--nb-surface` | `#FFFFFF` | `#262626` | Cards, forms, dialogs |
+| `--nb-ink` | `#000000` | `#F5F5F5` | Borders and shadows |
+| `--nb-text` / `--nb-muted` | `#000` / `#3D3D3D` | `#F5F5F5` / `#BDBDBD` | Primary and supporting text |
+| `--nb-yellow` | `#FFDE59` | same | Primary action, dominant accent |
+| `--nb-cyan`, `--nb-pink`, `--nb-lavender`, `--nb-green` | — | same | Supporting accents (metrics, bands, success) |
+| `--nb-red` / `--nb-red-pale` | `#FF6B6B` / `#FFD3D3` | same | Destructive action / error message |
 
-`--accent` is the only brand accent. Status meaning must also be present in text or iconography, not encoded by colour alone. Team colours come from the seeded `Team.color` data and are data visualisation values, not page accents.
+Each screen uses yellow as its dominant accent plus one or two supporting accents (Player: cyan header; Host: lavender live header, green analytics; Portal: pink countdown, cyan/pink metrics). Text on any accent fill is always black, including in dark mode. Status meaning must also be present in text, not encoded by colour alone. Team colours come from the seeded `Team.color` data and are data visualisation values, not page accents.
 
 ### Typography and shape
 
-- Use `Geist` through `next/font` for UI text and `Geist Mono` only for codes, values, countdowns, and compact telemetry.
-- Use a type scale of 14, 16, 20, 28, 40, and 56px. Portal may use fluid `clamp()` values inside its fixed 16:9 presentation layout.
-- Use 16px radius for panels, 12px for inputs and buttons, and fully rounded only for compact status chips and avatars. Do not mix arbitrary radii.
-- Body text meets WCAG AA contrast. Large Portal metrics target AAA contrast against their background.
-- Never rely on a glowing effect, a gradient headline, or a decorative grid to establish hierarchy.
+- Load fonts through `next/font`: `Archivo Black` for headings, `Space Grotesk` (500/700) for UI text, and `Space Mono` for codes, values, countdowns, eyebrow labels, and compact telemetry.
+- Portal may use fluid `clamp()` values inside its fixed 16:9 presentation layout.
+- Use a single 6px radius for panels, inputs, and buttons; fully rounded only for status chips and badges.
+- Borders are 3px (`--nb-border`) on surfaces and 2px (`--nb-rule`) on inner rules and chips. Shadows are `2px`, `4px`, or `8px` hard offsets (`6px`/`10px` on the Portal). Never use blur, gradients, glows, or translucency.
+- One or two deliberate "sticker" moments per screen may use a slight rotation (highlighted heading word via `<mark>`, Portal room code, QR card).
+- Body text meets WCAG AA contrast. Large Portal metrics target AAA contrast against their fill.
 
 ### Core interaction patterns
 
-- Primary buttons use accent background with high-contrast text, have a minimum 44px target, and depress by `translateY(1px)` or `scale(0.98)` on active.
+- Buttons have a minimum 44px target and press into their shadow: on hover they translate by half the shadow offset, and on active by the full offset with the shadow removed. Disabled buttons are flat grey with no shadow.
+- Inputs gain the full shadow and a pale yellow fill on focus. Focus-visible uses a 3px ink outline with a 3px offset.
 - Labels sit above every input. Placeholder text is an example, never the label.
-- Use inline error text directly below its relevant control. Use a toast only for transient confirmation after a successful action.
+- Use inline messages directly below the relevant control: `.form-message` for errors, `.form-message--ok` for confirmations. Use a toast only for transient confirmation after a successful action.
 - Loading placeholders mirror the final layout. Do not use a blocking spinner for a full page that already has cached data.
 - Error and empty states preserve the page frame and offer the next useful action, such as `Try again`, `Return to sign in`, or `Refresh state`.
-- At `MOTION_INTENSITY: 3`, only opacity and transform transitions are permitted. Respect `prefers-reduced-motion` by rendering changes immediately.
+- At `MOTION_INTENSITY: 3`, only opacity and transform transitions (80–150ms) are permitted. Respect `prefers-reduced-motion` by rendering changes immediately and disabling press translations.
 
 ### Responsive rules
 
@@ -319,7 +320,7 @@ The export menu lists the current run and unexpired archive entries from `GET /a
 
 Portal is a public, read-only, 16:9 presentation surface. It must work well from a projector or shared screen, update in no more than two seconds under normal polling, and never reveal unrevealed picks.
 
-The page uses a dark presentation theme with the same teal accent token. It has no vertical scrollbars, no mouse-dependent controls, and no hidden controls required for comprehension. `F` toggles fullscreen when browser permission allows; the explicit fullscreen button remains focusable. The cursor may fade after inactivity but returns on movement or keyboard use.
+The page uses a fixed dark presentation theme (cream ink borders and shadows on a near-black dot-grid ground) with a yellow header band and bright accent blocks carrying black text. The join QR code is rendered black on a white card for reliable scanning. It has no vertical scrollbars, no mouse-dependent controls, and no hidden controls required for comprehension. `F` toggles fullscreen when browser permission allows; the explicit fullscreen button remains focusable. The cursor may fade after inactivity but returns on movement or keyboard use.
 
 ### Structural layout
 

@@ -48,13 +48,13 @@ function PortalStage({ game }: { game: PublicProjection }) {
 function JoinQr({ code }: { code: string }) {
   const destination = useMemo(() => typeof window === "undefined" ? `/login?code=${code}` : new URL(`/login?code=${code}`, window.location.origin).toString(), [code]);
   const [image, setImage] = useState<string | null>(null);
-  useEffect(() => { void toDataURL(destination, { errorCorrectionLevel: "M", margin: 3, width: 480, color: { dark: "#F1F5F9", light: "#111827" } }).then(setImage); }, [destination]);
+  useEffect(() => { void toDataURL(destination, { errorCorrectionLevel: "M", margin: 3, width: 480, color: { dark: "#000000", light: "#FFFFFF" } }).then(setImage); }, [destination]);
   return <div className="join-qr">{image ? <Image src={image} width={240} height={240} unoptimized alt={`QR code linking to ${destination}`} /> : <div className="qr-placeholder" aria-label="Preparing QR code" />}<a href={destination}>{destination}</a></div>;
 }
 
 function Lobby({ game }: { game: PublicProjection }) {
   const p = game.currentRound?.settings.p ?? "0.8";
-  return <section className="portal-stage portal-lobby"><div className="lobby-copy"><p className="eyeline">The room is gathering</p><h1>Scan to join.</h1><p>Scan to sign in with your roster account.</p><p className="portal-code" aria-label={`Game code ${game.code}`}>{game.code}</p><p className="rule-copy">{ruleSentence(p)}</p><p>The host will open the first round when everyone is ready.</p></div><JoinQr code={game.code} /><RosterWall game={game} /></section>;
+  return <section className="portal-stage portal-lobby"><div className="lobby-copy"><p className="eyeline">The room is gathering</p><h1>Scan to <mark>join</mark>.</h1><p>Scan to sign in with your roster account.</p><p className="portal-code" aria-label={`Game code ${game.code}`}>{game.code}</p><p className="rule-copy">{ruleSentence(p)}</p><p>The host will open the first round when everyone is ready.</p></div><JoinQr code={game.code} /><RosterWall game={game} /></section>;
 }
 
 function OpenRound({ game }: { game: PublicProjection }) {
@@ -64,7 +64,7 @@ function OpenRound({ game }: { game: PublicProjection }) {
 }
 
 function Locked({ game }: { game: PublicProjection }) {
-  return <section className="portal-stage portal-locked"><p className="eyeline">Round {game.currentRound?.number}</p><h1>Picks are locked.</h1><p>The Host will reveal the result shortly. {game.submittedCount} of {game.activeCount} active players submitted.</p><RosterWall game={game} progress /></section>;
+  return <section className="portal-stage portal-locked"><p className="eyeline">Round {game.currentRound?.number}</p><h1>Picks are <mark>locked</mark>.</h1><p>The Host will reveal the result shortly. {game.submittedCount} of {game.activeCount} active players submitted.</p><RosterWall game={game} progress /></section>;
 }
 
 function Reveal({ game }: { game: PublicProjection }) {

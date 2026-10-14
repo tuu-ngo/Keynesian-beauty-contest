@@ -66,7 +66,7 @@ export function PlayerLoginForm() {
     <section className="login-intro">
       <p className="wordmark">Keynesian Beauty Contest</p>
       <div>
-        <h1>Read the room.</h1>
+        <h1>Read the <mark>room</mark>.</h1>
         <p>Choose a number closest to the target based on the group&apos;s average.</p>
       </div>
       <Link href="/host" className="text-link">Host sign in</Link>
