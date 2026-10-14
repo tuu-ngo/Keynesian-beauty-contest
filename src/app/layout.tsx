@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google"; // taste-skill-ignore: FRONTEND.md requires Geist Mono for codes, values, and countdowns.
+import { Archivo_Black, Space_Grotesk, Space_Mono } from "next/font/google";
 import "./globals.css";
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
-const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" }); // taste-skill-ignore: FRONTEND.md requires Geist Mono for numeric telemetry.
+const archivoBlack = Archivo_Black({ subsets: ["latin"], weight: "400", variable: "--font-archivo-black" });
+const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-space-grotesk" });
+const spaceMono = Space_Mono({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-space-mono" });
 
 export const metadata: Metadata = {
   title: "Keynesian Beauty Contest",
@@ -14,8 +15,8 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${geist.variable} ${geistMono.variable}`}>{children}</body> {/* taste-skill-ignore: the Mono token is only applied to numeric values. */}
+    <html lang="en" className={`${archivoBlack.variable} ${spaceGrotesk.variable} ${spaceMono.variable}`} suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }

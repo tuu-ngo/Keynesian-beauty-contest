@@ -28,6 +28,7 @@ function actionsFor(game: HostProjection): Array<Exclude<HostCommand["type"], "U
 export function HostClient({ code }: { code: string }) {
   const room = useRoomState({ code, view: "host", pauseWhenHidden: false });
   const [notice, setNotice] = useState("");
+  const [noticeOk, setNoticeOk] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingCommand>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -49,12 +50,12 @@ export function HostClient({ code }: { code: string }) {
   }
   async function send(type: HostCommand["type"], payload?: { p?: "0.8" | "2/3" | "1/2"; timerSeconds?: number | null }) {
     if (!room.data) return;
-    setSubmitting(type); setNotice("");
+    setSubmitting(type); setNotice(""); setNoticeOk(false);
     const base = { type, commandId: crypto.randomUUID(), expectedVersion: room.data.version };
     const body = type === "UPDATE_SETTINGS" ? { ...base, payload: payload ?? {} } : base;
     try {
       await roomRequest("/api/room/command", { method: "POST", body });
-      if (type === "RESET") setNotice("A new run has started. Players with retained sessions can join the lobby again.");
+      if (type === "RESET") { setNotice("A new run has started. Players with retained sessions can join the lobby again."); setNoticeOk(true); }
       await room.refresh();
     } catch (error) {
       if (error instanceof RoomClientError && error.problem.code === "VERSION_CONFLICT") {
@@ -71,7 +72,7 @@ export function HostClient({ code }: { code: string }) {
     <div className="host-layout">
       <aside className="command-rail"><ConnectionStatus state={room.connection} /><p className="eyeline">Current action</p><h1>{actionLabel[actionsFor(game)[0]]}</h1>{actionsFor(game).map((action) => <button key={action} className={action === actionsFor(game)[0] ? "button button--primary" : "button button--secondary"} disabled={submitting !== null} onClick={() => void command(action)}>{submitting === action ? "Working…" : actionLabel[action]}</button>)}{game.status !== "FINISHED" && <button className="button button--secondary" disabled={submitting !== null} onClick={() => void command("RESET")}>Start new run</button>}
         {(game.status === "LOBBY" || game.status === "ROUND_REVEALED") && <NextRoundSettings game={game} busy={submitting === "UPDATE_SETTINGS"} onSave={(payload) => send("UPDATE_SETTINGS", payload)} />}
-        {notice && <p className="form-message" role="status">{notice}</p>}
+        {notice && <p className={`form-message ${noticeOk ? "form-message--ok" : ""}`} role="status">{notice}</p>}
       </aside>
       <section className="host-live"><header><div><p className="eyeline">Live room</p><h2>{game.status === "ROUND_OPEN" ? `Round ${game.currentRound?.number}` : game.status.replaceAll("_", " ")}</h2></div><p>{game.submittedCount} of {game.activeCount} active players submitted</p></header>
         <RosterByTeam game={game} />
