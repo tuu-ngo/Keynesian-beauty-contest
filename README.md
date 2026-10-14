@@ -180,7 +180,7 @@ Computed from stored data:
 - **Next.js (App Router) + TypeScript**, deployed on **Vercel**. Tailwind CSS for styling. Charts via a lightweight library (e.g. Recharts or visx) or hand-rolled SVG — the reveal animation should be SVG/CSS (e.g. Framer Motion), not a canvas screenshot.
 - **State store: Upstash Redis** (Vercel Marketplace / Vercel KV-compatible). Chosen because Vercel serverless functions are stateless and have no persistent WebSocket support. Keep a thin `Store` interface (`getGame`, `mutateGame`, …) so the backend can be swapped (e.g. Supabase) without touching game logic.
 - Pure game logic (state machine, scoring, level-k bins) lives in `src/lib/game/` with **no framework or I/O imports** so it is fully unit-testable.
-- Node ≥ 20, `pnpm`.
+- Node ≥ 20, `npm`.
 
 ### 4.2 Real-time transport
 Vercel functions cannot hold long-lived WebSocket connections, so:
@@ -251,7 +251,7 @@ NEXT_PUBLIC_BASE_URL=        # used for the join link and QR code
 ```
 - Local dev must work with **no external services** using the in-memory store (`STORE=memory`).
 - Deploy: push to GitHub, import the repo in Vercel, attach an Upstash Redis integration, set env vars. No build-time secrets beyond those above.
-- Add `pnpm dev`, `pnpm test`, `pnpm lint`, `pnpm build` scripts.
+- Add `npm run dev`, `npm test`, `npm run lint`, `npm run build` scripts.
 
 ## 7. Acceptance criteria
 1. Host creates a game, a second browser (Portal) and ≥ 3 simulated phones join; lobby shows names live on the Portal within 2 s.
@@ -261,7 +261,7 @@ NEXT_PUBLIC_BASE_URL=        # used for the join link and QR code
 4. Closing and reopening a Player or Host tab restores the session; Portal survives a 30 s offline period and resyncs.
 5. 200 simulated players (script in `tests/load/`) complete a round with p95 state-poll latency < 500 ms.
 6. Final screen shows leaderboard, convergence chart, and the level-k debrief.
-7. `pnpm build` passes and the app runs on Vercel with Upstash; `STORE=memory pnpm dev` runs offline.
+7. `npm run build` passes and the app runs on Vercel with Upstash; `STORE=memory npm run dev` runs offline.
 
 ## 8. Out of scope (v1)
 Accounts and persistent profiles, payments, multi-host/co-host, video/voice, moderation dashboards, native apps, long-term game history beyond the 24 h expiry.
