@@ -123,11 +123,11 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
 
 function PlayerResult({ game }: { game: PlayerProjection }) {
   const result = latestResult(game)!;
-  const ownWinner = result.winners.find((winner) => winner.username === game.self.username);
+  const roundDelta = result.pointsByUsername[game.self.username] ?? 0;
   const self = game.players.find((player) => player.username === game.self.username);
   return <section className="player-result"><p className="eyeline">Round {result.number} result</p><h1>{game.status === "FINISHED" ? "The game is finished" : "Here’s what the room chose"}</h1>
     <div className="metric-pair"><Metric label="Average" value={decimal(result.average)} /><Metric label="Target" value={decimal(result.target)} /></div>
-    <div className="personal-result"><p>Your pick <strong>{tenths(game.self.currentPickTenths)}</strong></p><p>Points this round <strong>{ownWinner?.points ?? 0}</strong></p><p>Total points <strong>{game.self.totalPoints}</strong></p></div>
+    <div className="personal-result"><p>Your pick <strong>{tenths(game.self.currentPickTenths)}</strong></p><p>Points this round <strong>{roundDelta > 0 ? `+${roundDelta}` : roundDelta}</strong></p><p>Total points <strong>{game.self.totalPoints}</strong></p></div>
     <p>{result.winners.length ? `Winner${result.winners.length === 1 ? "" : "s"}: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p>
     {result.eliminatedUsername && <p className="notice notice--danger">{result.eliminatedUsername} was eliminated. {game.self.status === "ELIMINATED" ? "You can keep following as a spectator." : ""}</p>}
     {game.escalationReason === "NASH" && <p className="notice">The group reached Nash equilibrium. Escalation rules apply next round.</p>}

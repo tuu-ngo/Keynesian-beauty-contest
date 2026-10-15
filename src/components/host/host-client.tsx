@@ -10,6 +10,7 @@ import { useRoomState } from "@/components/room/use-room-state";
 
 type Archive = { runId: string; runNumber: number; endedAt: string; reason: string; expiresAt: string };
 type PendingCommand = "FINISH" | "RESET" | null;
+type SettingsPayload = Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"];
 
 const actionLabel: Record<string, string> = {
   OPEN_ROUND: "Open round", LOCK_ROUND: "Lock round", REVEAL_ROUND: "Reveal result", START_ESCALATION: "Start escalation", FINISH: "Finish game", RESET: "Start new run",
@@ -43,12 +44,12 @@ export function HostClient({ code }: { code: string }) {
     void roomRequest<Archive[]>("/api/room/archives").then(setArchives).catch(() => setArchives([]));
   }, [activeRunId, activeStatus]);
 
-  async function command(type: Exclude<HostCommand["type"], "UPDATE_SETTINGS">, payload?: { p?: "0.8" | "2/3" | "1/2"; timerSeconds?: number | null }) {
+  async function command(type: Exclude<HostCommand["type"], "UPDATE_SETTINGS">, payload?: SettingsPayload) {
     if (!room.data) return;
     if (type === "FINISH" || type === "RESET") { setPending(type); return; }
     await send(type, payload);
   }
-  async function send(type: HostCommand["type"], payload?: { p?: "0.8" | "2/3" | "1/2"; timerSeconds?: number | null }) {
+  async function send(type: HostCommand["type"], payload?: SettingsPayload) {
     if (!room.data) return;
     setSubmitting(type); setNotice(""); setNoticeOk(false);
     const base = { type, commandId: crypto.randomUUID(), expectedVersion: room.data.version };
@@ -83,13 +84,29 @@ export function HostClient({ code }: { code: string }) {
   </main>;
 }
 
-function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy: boolean; onSave: (payload: { p?: "0.8" | "2/3" | "1/2"; timerSeconds?: number | null }) => Promise<void> }) {
+function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy: boolean; onSave: (payload: SettingsPayload) => Promise<void> }) {
   const saved = game.nextRoundSettings;
   const [p, setP] = useState(saved.p);
-  const [timer, setTimer] = useState<string>(saved.timerSeconds === null ? "off" : String(saved.timerSeconds));
-  useEffect(() => { setP(saved.p); setTimer(saved.timerSeconds === null ? "off" : String(saved.timerSeconds)); }, [saved.p, saved.timerSeconds]);
-  function submit(event: FormEvent) { event.preventDefault(); const parsed = timer === "off" ? null : Number(timer); void onSave({ p, timerSeconds: Number.isFinite(parsed) ? parsed : null }); }
-  return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="off">Off</option></select></label><p>Changes apply to the next round. The open round keeps its saved settings.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
+  const timerText = (seconds: number | null) => seconds === null ? "off" : String(seconds);
+  const [timer, setTimer] = useState<string>(timerText(saved.timerSeconds));
+  const [winPoints, setWinPoints] = useState(String(saved.winPoints ?? 10));
+  const [losePoints, setLosePoints] = useState(String(saved.losePoints ?? 0));
+  const [maxPoints, setMaxPoints] = useState(saved.maxPoints == null ? "" : String(saved.maxPoints));
+  useEffect(() => {
+    setP(saved.p); setTimer(timerText(saved.timerSeconds));
+    setWinPoints(String(saved.winPoints ?? 10)); setLosePoints(String(saved.losePoints ?? 0)); setMaxPoints(saved.maxPoints == null ? "" : String(saved.maxPoints));
+  }, [saved.p, saved.timerSeconds, saved.winPoints, saved.losePoints, saved.maxPoints]);
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const seconds = timer === "off" ? null : (Number(timer) as 60 | 90 | 120);
+    const cap = maxPoints.trim() === "" ? null : Number(maxPoints);
+    void onSave({ p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), maxPoints: cap });
+  }
+  return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="90">90 seconds</option><option value="120">120 seconds</option><option value="off">Off</option></select></label>
+    <label><span>Points per win</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={winPoints} onChange={(event) => setWinPoints(event.target.value)} /></label>
+    <label><span>Points lost per loss</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={losePoints} onChange={(event) => setLosePoints(event.target.value)} /></label>
+    <label><span>Max points per player</span><input type="number" inputMode="numeric" min={1} max={100000} step={1} placeholder="No limit" value={maxPoints} onChange={(event) => setMaxPoints(event.target.value)} /></label>
+    <p>Changes apply to the next round. The open round keeps its saved settings. A loss only counts in rounds that have a winner; totals never go below 0.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
 }
 
 function RosterByTeam({ game }: { game: HostProjection }) {

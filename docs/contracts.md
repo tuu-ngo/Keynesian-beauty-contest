@@ -47,7 +47,13 @@ type Participant = Account & {
   eliminatedInRound: number | null;
   totalPoints: number;
 };
-type RoundSettings = { p: P; min: 0; max: 100; step: 0.1; timerSeconds: number | null }; // default timer: 60s; null = off
+type RoundSettings = {
+  p: P; min: 0; max: 100; step: 0.1;
+  timerSeconds: number | null; // 60 | 90 | 120 from the host UI (default 60); null = off
+  winPoints: number;  // default 10
+  losePoints: number; // default 0; deducted from every non-winner, only in rounds that have a winner
+  maxPoints: number | null; // per-player total cap; null = no cap. Totals are floored at 0
+};
 type RoundResult = {
   average: string | null; // decimal for display; null when there are no picks
   target: string | null;
@@ -55,7 +61,7 @@ type RoundResult = {
   eliminatedUsername: string | null;
   eliminationSeed: string | null;
   eliminationCandidates: string[];
-  pointsByUsername: Record<string, number>;
+  pointsByUsername: Record<string, number>; // signed delta actually applied (after cap/floor); omitted when 0
 };
 type Round = {
   number: number;
@@ -138,7 +144,7 @@ Máy trạng thái: `LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED �
 ```ts
 type HostCommand = { commandId: string; expectedVersion: number } & (
   | { type: 'OPEN_ROUND' | 'LOCK_ROUND' | 'REVEAL_ROUND' | 'START_ESCALATION' | 'FINISH' | 'RESET' }
-  | { type: 'UPDATE_SETTINGS'; payload: { p?: P; timerSeconds?: number | null } }
+  | { type: 'UPDATE_SETTINGS'; payload: { p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; maxPoints?: number | null } }
 );
 ```
 
