@@ -539,11 +539,11 @@ describe("room model", () => {
       expect(game.run.rounds[0].result).toMatchObject({ target: "42", winners: first });
     });
 
-    it("uses the fixed target for CSV distances and the default pick", () => {
+    it("uses the fixed target for CSV distances while default picks remain ineligible", () => {
       let game = prepare(joinAll(room()), 50);
       game = command(game, "OPEN_ROUND").room;
       game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
-      expect(game.run.rounds[0].result?.winners.sort()).toEqual(["ada", "bea", "cy"]);
+      expect(game.run.rounds[0].result?.winners).toEqual([]);
       const csv = csvForArchive(publicArchive(game));
       expect(csv).toContain(",HOST_TARGET,ada,Ada,red,50,0,");
     });
