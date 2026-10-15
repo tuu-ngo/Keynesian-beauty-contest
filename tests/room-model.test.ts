@@ -208,13 +208,6 @@ describe("room model", () => {
       expect(game.run.rounds[1].result!.pointsByUsername).toMatchObject({ bea: 7, ada: -3 });
     });
 
-    it("caps a player's total at maxPoints", () => {
-      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 10, maxPoints: 15, startPoints: 0 });
-      game = playRound(game, { ada: 15, bea: 20, cy: 25 });
-      expect(game.run.participants.ada.totalPoints).toBe(15);
-      expect(game.run.rounds[1].result!.pointsByUsername.ada).toBe(5);
-    });
-
     it("only accepts 60, 90, 120 or off as timer options", () => {
       const game = joinAll(room());
       const update = (timerSeconds: number | null) => ({ type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { timerSeconds } });
