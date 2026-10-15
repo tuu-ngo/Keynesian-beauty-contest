@@ -18,6 +18,8 @@ export interface InternalRound extends Round {
   picks: Record<string, number>;
   /** Server-only while open. Values are whole virtual points and are settled at reveal. */
   stakes: Record<string, number>;
+  /** Players whose pick was filled with the default at lock. They count toward the average but cannot win and are eliminated first. */
+  defaultedUsernames: string[];
   /** Rule 1 needs this audit field; it is intentionally not part of the public result. */
   disqualifiedUsernames: string[];
   /** State changed by REVEAL_ROUND; retained only so the Host can undo that reveal safely. */
@@ -300,8 +302,12 @@ export function purgeExpiredArchives(room: Room, now: number): Room {
 export const DEFAULT_PICK_TENTHS = 500;
 
 function fillDefaultPicks(run: Run, round: InternalRound): void {
+  const defaulted = (round.defaultedUsernames ??= []);
   for (const participant of activeParticipants(run)) {
-    round.picks[participant.username] ??= DEFAULT_PICK_TENTHS;
+    if (round.picks[participant.username] === undefined) {
+      round.picks[participant.username] = DEFAULT_PICK_TENTHS;
+      if (!defaulted.includes(participant.username)) defaulted.push(participant.username);
+    }
     (round.stakes ??= {})[participant.username] ??= 0;
   }
 }
@@ -400,8 +406,12 @@ function score(round: InternalRound, run: Run): RoundResult {
   const targetDenominator = factorDenominator * numberOfPicks;
   const distances = new Map(entries.map(([username, value]) => [username, value < 0 ? 0n : (BigInt(value) * targetDenominator - targetNumerator < 0n ? -(BigInt(value) * targetDenominator - targetNumerator) : BigInt(value) * targetDenominator - targetNumerator)]));
 
+  // Default picks count toward the average, but they are not a choice: they
+  // cannot win and do not make a real pick of 50 a Rule 1 duplicate.
+  const defaulted = new Set(round.defaultedUsernames ?? []);
+  const chosen = entries.filter(([username]) => !defaulted.has(username));
   const duplicateGroups = new Map<number, string[]>();
-  for (const [username, value] of entries) {
+  for (const [username, value] of chosen) {
     const group = duplicateGroups.get(value) ?? [];
     group.push(username);
     duplicateGroups.set(value, group);
@@ -409,7 +419,7 @@ function score(round: InternalRound, run: Run): RoundResult {
   const ruleOne = run.activeRules.includes(1);
   const disqualified = ruleOne ? [...duplicateGroups.values()].filter((group) => group.length > 1).flat() : [];
   const disqualifiedSet = new Set(disqualified);
-  const eligible = entries.filter(([username]) => !disqualifiedSet.has(username));
+  const eligible = chosen.filter(([username]) => !disqualifiedSet.has(username));
 
   let winners: string[] = [];
   const ruleTwo = run.activeRules.includes(2);
@@ -510,7 +520,8 @@ function eliminate(room: Room, round: InternalRound, seed: string): void {
   const result = round.result!;
   const winners = new Set(result.winners);
   const active = activeUsernames(run);
-  const submitted = new Set(Object.keys(round.picks));
+  const defaulted = new Set(round.defaultedUsernames ?? []);
+  const submitted = new Set(Object.keys(round.picks).filter((username) => !defaulted.has(username)));
   const disqualified = new Set(round.disqualifiedUsernames);
   const groups = [
     active.filter((username) => !submitted.has(username) && !winners.has(username)),
@@ -605,7 +616,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       next.pickReceipts = {};
       const settings = clone(run.settingsForNextRound);
       const openedAt = iso(now);
-      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, stakes: {}, disqualifiedUsernames: [], revealStateBefore: null });
+      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, stakes: {}, defaultedUsernames: [], disqualifiedUsernames: [], revealStateBefore: null });
       run.status = "ROUND_OPEN";
       changed = true;
       break;

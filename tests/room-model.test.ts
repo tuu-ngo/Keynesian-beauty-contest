@@ -538,4 +538,79 @@ describe("room model", () => {
     expect(game.run.status).toBe("ROUND_LOCKED");
     expect(game.run.rounds[0].picks).toEqual({ ada: 100, bea: 500, cy: 500 });
   });
+
+  describe("default picks", () => {
+    function pick(game: Room, username: string, value: number): Room {
+      const round = game.run.rounds.at(-1)!.number;
+      return submitPick(game, { username, runId: game.run.id, round, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+
+    function escalated(): Room {
+      let game = command(joinAll(room()), "OPEN_ROUND").room;
+      game = command(game, "LOCK_ROUND").room;
+      game = command(game, "REVEAL_ROUND").room;
+      return command(game, "START_ESCALATION").room;
+    }
+
+    it("counts a default pick in the average but never lets it win", () => {
+      let game = command(joinAll(room()), "OPEN_ROUND").room;
+      game = pick(game, "ada", 90);
+      game = pick(game, "bea", 10);
+      game = command(game, "LOCK_ROUND").room;
+      expect(game.run.rounds[0].defaultedUsernames).toEqual(["cy"]);
+      game = command(game, "REVEAL_ROUND").room;
+      const result = game.run.rounds[0].result!;
+      // Cy's default 50 sits exactly 10 from the target of 40, closer than Bea's 30.
+      expect(result.average).toBe("50");
+      expect(result.target).toBe("40");
+      expect(result.winners).toEqual(["bea"]);
+      expect(result.pointsByUsername.cy).toBeUndefined();
+    });
+
+    it("gives no winner and no points when nobody pressed save", () => {
+      let game = command(joinAll(room()), "OPEN_ROUND").room;
+      game = command(game, "LOCK_ROUND").room;
+      game = command(game, "REVEAL_ROUND").room;
+      const result = game.run.rounds[0].result!;
+      expect(result.average).toBe("50");
+      expect(result.winners).toEqual([]);
+      expect(result.pointsByUsername).toEqual({});
+      expect(game.run.phase).toBe("NORMAL");
+    });
+
+    it("eliminates a non-submitter first in escalation, even when the default is closest", () => {
+      let game = command(escalated(), "OPEN_ROUND").room;
+      game = pick(game, "ada", 90);
+      game = pick(game, "bea", 10);
+      game = command(game, "LOCK_ROUND").room;
+      game = command(game, "REVEAL_ROUND").room;
+      const result = game.run.rounds[1].result!;
+      expect(result.winners).toEqual(["bea"]);
+      expect(result.eliminationCandidates).toEqual(["cy"]);
+      expect(result.eliminatedUsername).toBe("cy");
+      expect(game.run.participants.ada.status).toBe("ACTIVE");
+    });
+
+    it("does not make a real pick of 50 a Rule 1 duplicate of a default", () => {
+      let game = command(escalated(), "OPEN_ROUND").room;
+      game = pick(game, "ada", 50);
+      game = pick(game, "bea", 10);
+      game = command(game, "LOCK_ROUND").room;
+      game = command(game, "REVEAL_ROUND").room;
+      expect(game.run.rounds[1].disqualifiedUsernames).toEqual([]);
+      expect(game.run.rounds[1].result!.eliminatedUsername).toBe("cy");
+    });
+
+    it("eliminates one of several non-submitters by the stored seed", () => {
+      let game = command(escalated(), "OPEN_ROUND").room;
+      game = pick(game, "ada", 0);
+      game = command(game, "LOCK_ROUND").room;
+      game = command(game, "REVEAL_ROUND").room;
+      const result = game.run.rounds[1].result!;
+      expect(result.winners).toEqual(["ada"]);
+      expect(result.eliminationCandidates).toEqual(["bea", "cy"]);
+      expect(["bea", "cy"]).toContain(result.eliminatedUsername);
+      expect(result.eliminationSeed).toBe("test-seed");
+    });
+  });
 });
