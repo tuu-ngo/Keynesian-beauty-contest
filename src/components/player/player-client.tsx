@@ -109,28 +109,65 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
   const [message, setMessage] = useState("");
   const [savedOk, setSavedOk] = useState(false);
   const [now, setNow] = useState(Date.parse(game.serverNow));
-  useEffect(() => { setValue(saved === null ? "50" : String(saved / 10)); }, [round.number, saved]);
+  // `touched` keeps a late server refresh from snapping the slider back while the player is still dragging.
+  const touched = useRef(false);
+  const lastSent = useRef<number | null>(saved === null ? null : saved / 10);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { touched.current = false; setValue(saved === null ? "50" : String(saved / 10)); lastSent.current = saved === null ? null : saved / 10; }, [round.number]);
+  useEffect(() => {
+    lastSent.current = saved === null ? null : saved / 10;
+    if (!touched.current) setValue(saved === null ? "50" : String(saved / 10));
+  }, [saved]);
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []);
   const timeUp = Boolean(round.deadlineAt && now >= Date.parse(round.deadlineAt));
   const numeric = Number(value);
   const valid = Number.isInteger(numeric) && numeric >= round.settings.min && numeric <= round.settings.max;
+  function change(next: string) { touched.current = true; setValue(next); }
+
+  /** Sends the pick; requests are chained so the last value the player chose is always the last one the server sees. */
+  function send(target: number): Promise<boolean> {
+    const run = queue.current.then(async () => {
+      try {
+        await roomRequest("/api/room/pick", { method: "PUT", headers: authHeaders(token), body: { runId: game.runId, round: round.number, value: target, requestId: crypto.randomUUID() } });
+        lastSent.current = target;
+        return true;
+      } catch (error) {
+        setMessage(error instanceof RoomClientError ? error.problem.message : "Could not save your pick. Try again.");
+        setSavedOk(false);
+        return false;
+      }
+    });
+    queue.current = run.then(() => undefined);
+    return run;
+  }
+
+  // Auto-save: whatever the player last chose is stored shortly after they stop moving it, and right away near the deadline.
+  useEffect(() => {
+    if (!touched.current || !valid || timeUp || lastSent.current === numeric) return;
+    const msLeft = round.deadlineAt ? Date.parse(round.deadlineAt) - Date.now() : Infinity;
+    const delay = Math.max(0, Math.min(600, msLeft - 1500));
+    const id = window.setTimeout(() => {
+      void send(numeric).then((ok) => { if (ok) { setMessage("Your pick is saved automatically. You can change it until the round is locked."); setSavedOk(true); void refresh(); } });
+    }, delay);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numeric, valid, timeUp, value]);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid) { setSavedOk(false); setMessage(`Enter a whole number from ${round.settings.min} to ${round.settings.max}.`); return; }
     setBusy(true); setMessage(""); setSavedOk(false); onAnnouncement("Saving pick");
-    try {
-      await roomRequest("/api/room/pick", { method: "PUT", headers: authHeaders(token), body: { runId: game.runId, round: round.number, value: numeric, requestId: crypto.randomUUID() } });
-      setMessage("Your pick is saved. You can update it until the round is locked."); setSavedOk(true); onAnnouncement("Pick saved"); await refresh();
-    } catch (error) {
-      setMessage(error instanceof RoomClientError ? error.problem.message : "Could not save your pick. Try again.");
-      void refresh();
-    } finally { setBusy(false); }
+    touched.current = true;
+    const ok = await send(numeric);
+    if (ok) { setMessage("Your pick is saved. You can update it until the round is locked."); setSavedOk(true); onAnnouncement("Pick saved"); await refresh(); } else void refresh();
+    setBusy(false);
   }
   return <form className="pick-form" onSubmit={submit}>
     <div><p className="eyeline">Round {round.number}</p><h1>Make your pick</h1><p>{ruleSentence(round.settings.p)}</p></div>
     <div className="round-detail"><span>{game.submittedCount} of {game.activeCount} submitted</span><Countdown deadlineAt={round.deadlineAt} serverNow={game.serverNow} /></div>
-    <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => setValue(String(Math.max(round.settings.min, (Number.isFinite(numeric) ? Math.round(numeric) : 50) - 1)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="numeric" min={round.settings.min} max={round.settings.max} step={1} value={value} onChange={(event) => setValue(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => setValue(String(Math.min(round.settings.max, (Number.isFinite(numeric) ? Math.round(numeric) : 50) + 1)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, as a whole number.</small></label>
-    <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={1} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => setValue(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
+    <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => change(String(Math.max(round.settings.min, (Number.isFinite(numeric) ? Math.round(numeric) : 50) - 1)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="numeric" min={round.settings.min} max={round.settings.max} step={1} value={value} onChange={(event) => change(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => change(String(Math.min(round.settings.max, (Number.isFinite(numeric) ? Math.round(numeric) : 50) + 1)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, as a whole number.</small></label>
+    <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={1} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => change(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
     {timeUp && <p className="form-message" id="pick-message">Time is up. Waiting for the game to lock.</p>}
     {!timeUp && message && <p className={`form-message ${savedOk ? "form-message--ok" : ""}`} id="pick-message">{message}</p>}
     <button className="button button--primary" disabled={busy || timeUp}>{busy ? "Saving pick…" : saved === null ? "Save pick" : "Update pick"}</button>
