@@ -22,6 +22,10 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
   const round = currentRound(room);
   const isOpen = room.run.status === "ROUND_OPEN";
   const hasCurrentSubmissions = round !== null && room.run.status !== "LOBBY";
+  const canCancelRoundResult = Boolean(round?.result) && (
+    (room.run.status === "ROUND_REVEALED" && !(room.run.escalationReason === "HOST" && round?.revealStateBefore?.escalationReason !== "HOST"))
+    || (room.run.status === "FINISHED" && room.run.finishedBy === "REVEAL")
+  );
   const active = Object.values(room.run.participants).filter((participant) => participant.status === "ACTIVE");
   const base = {
     schemaVersion: 1 as const,
@@ -45,7 +49,13 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       totalPoints: participant.totalPoints,
       finalPlacement: finalPlacement(room, participant.username),
     })),
-    currentRound: round ? { number: round.number, settings: round.settings, deadlineAt: isOpen ? round.deadlineAt : null } : null,
+    currentRound: round ? {
+      number: round.number,
+      settings: round.settings,
+      deadlineAt: isOpen ? round.deadlineAt : null,
+      timerPaused: isOpen && round.timerPaused === true,
+      pausedRemainingMs: isOpen && round.timerPaused === true ? round.pausedRemainingMs : null,
+    } : null,
     nextRoundSettings: room.run.settingsForNextRound,
     submittedCount: hasCurrentSubmissions ? active.filter((participant) => round.picks[participant.username] !== undefined).length : 0,
     activeCount: active.length,
@@ -68,6 +78,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
     return {
       ...base,
       view,
+      canCancelRoundResult,
       hostPicks: room.run.status === "ROUND_LOCKED" || room.run.status === "ROUND_REVEALED" || room.run.status === "FINISHED"
         ? Object.entries(round?.picks ?? {}).map(([pickUsername, valueTenths]) => ({ username: pickUsername, valueTenths }))
         : null,

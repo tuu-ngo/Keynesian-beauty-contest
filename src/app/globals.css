@@ -217,6 +217,12 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 .command-rail .button--primary { min-height: 60px; box-shadow: var(--nb-shadow-lg); font-size: 18px; }
 .command-rail .button--primary:hover:not(:disabled) { transform: translate(4px, 4px); box-shadow: var(--nb-shadow); }
 .command-rail .button--primary:active:not(:disabled) { transform: translate(8px, 8px); box-shadow: none; }
+.host-timer { display: grid; gap: 12px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-pink); padding: 16px; box-shadow: var(--nb-shadow-sm); }
+.host-timer--off { background: var(--nb-surface); }
+.host-timer p { margin: 0; }
+.host-timer--off strong { font-family: var(--nb-font-mono); font-size: 18px; }
+.host-timer__clock { display: block; margin-top: 4px; font-family: var(--nb-font-mono); font-size: 44px; font-weight: 700; letter-spacing: -.06em; line-height: 1; }
+.host-timer__actions { display: grid; gap: 8px; }
 .next-settings { display: grid; gap: 14px; margin-top: 18px; padding: 20px; }
 .next-settings h2, .roster h2, .host-round-detail h2 { margin: 0; font-size: 22px; }
 .next-settings p { margin: 0; color: var(--nb-muted); font-size: 14px; }

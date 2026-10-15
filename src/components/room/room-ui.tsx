@@ -8,16 +8,16 @@ export function ConnectionStatus({ state }: { state: ConnectionState }) {
   return <span className={`connection-status connection-status--${state}`} aria-live="polite"><span aria-hidden="true" />{label}</span>;
 }
 
-export function Countdown({ deadlineAt, serverNow, className = "" }: { deadlineAt: string | null; serverNow: string; className?: string }) {
-  const start = useMemo(() => Date.parse(deadlineAt ?? serverNow) - Date.parse(serverNow), [deadlineAt, serverNow]);
+export function Countdown({ deadlineAt, serverNow, paused = false, pausedRemainingMs = null, className = "" }: { deadlineAt: string | null; serverNow: string; paused?: boolean; pausedRemainingMs?: number | null; className?: string }) {
+  const start = useMemo(() => paused ? (pausedRemainingMs ?? 0) : Date.parse(deadlineAt ?? serverNow) - Date.parse(serverNow), [deadlineAt, paused, pausedRemainingMs, serverNow]);
   const [remaining, setRemaining] = useState(start);
   useEffect(() => {
     setRemaining(start);
-    if (!deadlineAt) return;
+    if (!deadlineAt || paused) return;
     const startedAt = Date.now();
     const timer = window.setInterval(() => setRemaining(Math.max(0, start - (Date.now() - startedAt))), 250);
     return () => window.clearInterval(timer);
-  }, [deadlineAt, start]);
+  }, [deadlineAt, paused, start]);
   if (!deadlineAt) return <span className={className}>No time limit</span>;
   const totalSeconds = Math.ceil(Math.max(0, remaining) / 1000);
   const minutes = Math.floor(totalSeconds / 60);

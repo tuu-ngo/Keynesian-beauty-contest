@@ -5,24 +5,26 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import type { HostCommand, HostProjection } from "@/contracts";
 import { RoomClientError, roomRequest } from "@/lib/api/room-client";
 import { decimal, shortDate, tenths } from "@/lib/formatters";
-import { ConnectionStatus, Metric, ScreenSkeleton, TeamMark } from "@/components/room/room-ui";
+import { ConnectionStatus, Countdown, Metric, ScreenSkeleton, TeamMark } from "@/components/room/room-ui";
 import { useRoomState } from "@/components/room/use-room-state";
 
 type Archive = { runId: string; runNumber: number; endedAt: string; reason: string; expiresAt: string };
 type PendingCommand = "FINISH" | "RESET" | null;
 type SettingsPayload = Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"];
+type PrimaryCommand = "OPEN_ROUND" | "LOCK_ROUND" | "REVEAL_ROUND" | "CANCEL_ROUND_RESULT" | "START_ESCALATION" | "FINISH" | "RESET";
+type TimerCommand = "PAUSE_TIMER" | "RESUME_TIMER" | "RESET_TIMER";
 
 const actionLabel: Record<string, string> = {
-  OPEN_ROUND: "Open round", LOCK_ROUND: "Lock round", REVEAL_ROUND: "Reveal result", START_ESCALATION: "Start escalation", FINISH: "Finish game", RESET: "Start new run",
+  OPEN_ROUND: "Open round", LOCK_ROUND: "Lock round", REVEAL_ROUND: "Reveal result", CANCEL_ROUND_RESULT: "Cancel round result", START_ESCALATION: "Start escalation", FINISH: "Finish game", RESET: "Start new run",
 };
 
-function actionsFor(game: HostProjection): Array<Exclude<HostCommand["type"], "UPDATE_SETTINGS">> {
+function actionsFor(game: HostProjection): PrimaryCommand[] {
   switch (game.status) {
     case "LOBBY": return ["OPEN_ROUND"];
     case "ROUND_OPEN": return ["LOCK_ROUND"];
     case "ROUND_LOCKED": return ["REVEAL_ROUND"];
-    case "ROUND_REVEALED": return game.phase === "ESCALATION" ? ["OPEN_ROUND", "FINISH"] : ["OPEN_ROUND", "START_ESCALATION", "FINISH"];
-    case "FINISHED": return ["RESET"];
+    case "ROUND_REVEALED": return game.phase === "ESCALATION" ? ["OPEN_ROUND", "CANCEL_ROUND_RESULT", "FINISH"] : ["OPEN_ROUND", "CANCEL_ROUND_RESULT", "START_ESCALATION", "FINISH"];
+    case "FINISHED": return game.canCancelRoundResult ? ["CANCEL_ROUND_RESULT", "RESET"] : ["RESET"];
   }
 }
 
@@ -44,7 +46,7 @@ export function HostClient({ code }: { code: string }) {
     void roomRequest<Archive[]>("/api/room/archives").then(setArchives).catch(() => setArchives([]));
   }, [activeRunId, activeStatus]);
 
-  async function command(type: Exclude<HostCommand["type"], "UPDATE_SETTINGS">, payload?: SettingsPayload) {
+  async function command(type: PrimaryCommand | TimerCommand, payload?: SettingsPayload) {
     if (!room.data) return;
     if (type === "FINISH" || type === "RESET") { setPending(type); return; }
     await send(type, payload);
@@ -71,7 +73,7 @@ export function HostClient({ code }: { code: string }) {
   return <main className="host-page">
     <header className="host-topbar"><Link href="/host" className="wordmark">Keynesian Beauty Contest</Link><span>Room <strong>{game.code}</strong></span><span className="topbar-state">{game.status.replaceAll("_", " ")}</span><a className="text-link" href={`/portal/${game.code}`} target="_blank" rel="noreferrer">Open Portal</a><div className="export-wrap"><button className="text-button" onClick={() => setExportsOpen((open) => !open)} aria-expanded={exportsOpen}>Export</button>{exportsOpen && <ExportMenu currentRun={game.runId} archives={archives} />}</div><button className="text-button" onClick={() => void logout()}>Sign out</button></header>
     <div className="host-layout">
-      <aside className="command-rail"><ConnectionStatus state={room.connection} /><p className="eyeline">Current action</p><h1>{actionLabel[actionsFor(game)[0]]}</h1>{actionsFor(game).map((action) => <button key={action} className={action === actionsFor(game)[0] ? "button button--primary" : "button button--secondary"} disabled={submitting !== null} onClick={() => void command(action)}>{submitting === action ? "Working…" : actionLabel[action]}</button>)}{game.status !== "FINISHED" && <button className="button button--secondary" disabled={submitting !== null} onClick={() => void command("RESET")}>Start new run</button>}
+      <aside className="command-rail"><ConnectionStatus state={room.connection} /><p className="eyeline">Current action</p><h1>{actionLabel[actionsFor(game)[0]]}</h1>{actionsFor(game).map((action) => <button key={action} className={action === actionsFor(game)[0] ? "button button--primary" : "button button--secondary"} disabled={submitting !== null} onClick={() => void command(action)}>{submitting === action ? "Working…" : actionLabel[action]}</button>)}{game.status === "ROUND_OPEN" && game.currentRound && <HostTimerControls game={game} busy={submitting !== null} submitting={submitting} onCommand={command} />}{game.status !== "FINISHED" && <button className="button button--secondary" disabled={submitting !== null} onClick={() => void command("RESET")}>Start new run</button>}
         {(game.status === "LOBBY" || game.status === "ROUND_REVEALED") && <NextRoundSettings game={game} busy={submitting === "UPDATE_SETTINGS"} onSave={(payload) => send("UPDATE_SETTINGS", payload)} />}
         {notice && <p className={`form-message ${noticeOk ? "form-message--ok" : ""}`} role="status">{notice}</p>}
       </aside>
@@ -83,6 +85,16 @@ export function HostClient({ code }: { code: string }) {
     </div>
     <dialog className="confirm-dialog" ref={dialog} onCancel={(event) => { event.preventDefault(); setPending(null); }}><form method="dialog"><h2>{pending === "FINISH" ? "Finish this game?" : "Start a new run?"}</h2><p>{pending === "FINISH" ? "This records the current run and stops further rounds." : "This archives the current run and returns every signed-in player to a new lobby."}</p><div><button className="button button--secondary" autoFocus onClick={() => setPending(null)}>Cancel</button><button className="button button--danger" onClick={() => pending && void send(pending)}>{pending === "FINISH" ? "Finish game" : "Start new run"}</button></div></form></dialog>
   </main>;
+}
+
+function HostTimerControls({ game, busy, submitting, onCommand }: { game: HostProjection; busy: boolean; submitting: string | null; onCommand: (type: TimerCommand) => Promise<void> }) {
+  const round = game.currentRound!;
+  if (round.settings.timerSeconds === null) return <section className="host-timer host-timer--off"><p className="eyeline">Round timer</p><strong>No time limit</strong></section>;
+  const primary: TimerCommand = round.timerPaused ? "RESUME_TIMER" : "PAUSE_TIMER";
+  return <section className="host-timer" aria-label="Round timer controls">
+    <div><p className="eyeline">Round timer{round.timerPaused ? " · stopped" : ""}</p><Countdown className="host-timer__clock" deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /></div>
+    <div className="host-timer__actions"><button className="button button--secondary" disabled={busy} onClick={() => void onCommand(primary)}>{submitting === primary ? "Working…" : round.timerPaused ? "Resume timer" : "Stop timer"}</button><button className="button button--secondary" disabled={busy} onClick={() => void onCommand("RESET_TIMER")}>{submitting === "RESET_TIMER" ? "Working…" : `Reset to ${round.settings.timerSeconds}s`}</button></div>
+  </section>;
 }
 
 function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy: boolean; onSave: (payload: SettingsPayload) => Promise<void> }) {

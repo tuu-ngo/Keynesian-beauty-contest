@@ -66,6 +66,9 @@ export const roundSchema = z.object({
   settings: roundSettingsSchema,
   openedAt: z.string().datetime(),
   deadlineAt: z.string().datetime().nullable(),
+  /** A paused timer keeps its precise remaining time until the Host resumes or resets it. */
+  timerPaused: z.boolean().default(false),
+  pausedRemainingMs: z.number().int().nonnegative().nullable().default(null),
   lockedAt: z.string().datetime().nullable(),
   revealedAt: z.string().datetime().nullable(),
   result: roundResultSchema.nullable(),
@@ -120,7 +123,13 @@ export const publicProjectionSchema = z.object({
   activeRules: z.array(ruleIdSchema),
   teams: z.array(teamSchema),
   players: z.array(publicPlayerSchema),
-  currentRound: z.object({ number: z.number().int().positive(), settings: roundSettingsSchema, deadlineAt: z.string().datetime().nullable() }).strict().nullable(),
+  currentRound: z.object({
+    number: z.number().int().positive(),
+    settings: roundSettingsSchema,
+    deadlineAt: z.string().datetime().nullable(),
+    timerPaused: z.boolean(),
+    pausedRemainingMs: z.number().int().nonnegative().nullable(),
+  }).strict().nullable(),
   nextRoundSettings: roundSettingsSchema,
   submittedCount: z.number().int().nonnegative(),
   activeCount: z.number().int().nonnegative(),
@@ -142,6 +151,7 @@ export const playerProjectionSchema = publicProjectionSchema.extend({
 
 export const hostProjectionSchema = publicProjectionSchema.extend({
   view: z.literal("host"),
+  canCancelRoundResult: z.boolean(),
   hostPicks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000) }).strict()).nullable(),
 }).strict();
 
@@ -150,7 +160,11 @@ export const stateResponseSchema = z.discriminatedUnion("view", [publicProjectio
 export const hostCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("OPEN_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("LOCK_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("PAUSE_TIMER"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("RESUME_TIMER"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("RESET_TIMER"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("REVEAL_ROUND"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal("CANCEL_ROUND_RESULT"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("START_ESCALATION"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("FINISH"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("RESET"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),

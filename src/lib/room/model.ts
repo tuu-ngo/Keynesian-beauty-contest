@@ -18,6 +18,8 @@ export interface InternalRound extends Round {
   picks: Record<string, number>;
   /** Rule 1 needs this audit field; it is intentionally not part of the public result. */
   disqualifiedUsernames: string[];
+  /** State changed by REVEAL_ROUND; retained only so the Host can undo that reveal safely. */
+  revealStateBefore: Pick<Run, "phase" | "escalationReason" | "activeRules"> | null;
 }
 
 export interface Run {
@@ -33,6 +35,8 @@ export interface Run {
   rounds: InternalRound[];
   createdAt: string;
   finishedAt: string | null;
+  /** Distinguishes an automatic final reveal from an explicit Host finish. */
+  finishedBy: "REVEAL" | "HOST" | null;
   archivedAt: string | null;
 }
 
@@ -108,7 +112,7 @@ export interface PublicRun {
   participants: Participant[];
   participationLocked: boolean;
   settingsForNextRound: RoundSettings;
-  rounds: Array<Omit<InternalRound, "disqualifiedUsernames">>;
+  rounds: Array<Omit<InternalRound, "disqualifiedUsernames" | "revealStateBefore">>;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -269,6 +273,7 @@ function newRun(number: number, now: number): Run {
     rounds: [],
     createdAt: iso(now),
     finishedAt: null,
+    finishedBy: null,
     archivedAt: null,
   };
 }
@@ -290,7 +295,7 @@ export function purgeExpiredArchives(room: Room, now: number): Room {
 
 export function resolveDeadline(room: Room, now: number): Room {
   const round = currentRound(room.run);
-  if (room.run.status !== "ROUND_OPEN" || !round?.deadlineAt || round.deadlineAt > iso(now)) return room;
+  if (room.run.status !== "ROUND_OPEN" || !round?.deadlineAt || round.timerPaused || round.deadlineAt > iso(now)) return room;
   const next = clone(room);
   next.run.status = "ROUND_LOCKED";
   const nextRound = currentRound(next.run)!;
@@ -482,6 +487,32 @@ function eliminate(room: Room, round: InternalRound, seed: string): void {
   run.participants[eliminated].eliminatedInRound = round.number;
 }
 
+/** Undo the effects of the current revealed round before allowing the Host to reveal it again. */
+function cancelRoundResult(run: Run): void {
+  const round = currentRound(run)!;
+  const result = round.result!;
+  for (const [username, points] of Object.entries(result.pointsByUsername)) {
+    run.participants[username].totalPoints -= points;
+  }
+  for (const username of [...result.pointEliminatedUsernames, result.eliminatedUsername].filter((value): value is string => value !== null)) {
+    const participant = run.participants[username];
+    participant.status = "ACTIVE";
+    participant.eliminatedInRound = null;
+  }
+  // The state snapshot prevents an undo of a later escalation round from
+  // accidentally erasing the Nash transition that happened in an earlier one.
+  if (round.revealStateBefore) {
+    run.phase = round.revealStateBefore.phase;
+    run.escalationReason = round.revealStateBefore.escalationReason;
+    run.activeRules = clone(round.revealStateBefore.activeRules);
+  }
+  round.result = null;
+  round.revealedAt = null;
+  round.disqualifiedUsernames = [];
+  round.revealStateBefore = null;
+  run.status = "ROUND_LOCKED";
+}
+
 function archive(room: Room, reason: "FINISH" | "RESET", now: number): void {
   if (room.run.archivedAt !== null || room.run.rounds.length === 0) return;
   const timestamp = iso(now);
@@ -513,7 +544,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       next.pickReceipts = {};
       const settings = clone(run.settingsForNextRound);
       const openedAt = iso(now);
-      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), lockedAt: null, revealedAt: null, result: null, picks: {}, disqualifiedUsernames: [] });
+      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, disqualifiedUsernames: [], revealStateBefore: null });
       run.status = "ROUND_OPEN";
       changed = true;
       break;
@@ -525,9 +556,39 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       changed = true;
       break;
     }
+    case "PAUSE_TIMER": {
+      if (run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION");
+      const round = currentRound(run)!;
+      if (!round.deadlineAt || round.timerPaused) throw new RoomError("INVALID_TRANSITION", "The round timer cannot be paused.");
+      round.pausedRemainingMs = Math.max(0, Date.parse(round.deadlineAt) - now);
+      round.timerPaused = true;
+      changed = true;
+      break;
+    }
+    case "RESUME_TIMER": {
+      if (run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION");
+      const round = currentRound(run)!;
+      if (!round.deadlineAt || !round.timerPaused || round.pausedRemainingMs === null) throw new RoomError("INVALID_TRANSITION", "The round timer cannot be resumed.");
+      round.deadlineAt = iso(now + round.pausedRemainingMs);
+      round.timerPaused = false;
+      round.pausedRemainingMs = null;
+      changed = true;
+      break;
+    }
+    case "RESET_TIMER": {
+      if (run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION");
+      const round = currentRound(run)!;
+      if (round.settings.timerSeconds === null) throw new RoomError("INVALID_TRANSITION", "This round has no timer to reset.");
+      round.deadlineAt = deadline(round.settings, now);
+      round.timerPaused = false;
+      round.pausedRemainingMs = null;
+      changed = true;
+      break;
+    }
     case "REVEAL_ROUND": {
       if (run.status !== "ROUND_LOCKED") throw new RoomError("INVALID_TRANSITION");
       const round = currentRound(run)!;
+      round.revealStateBefore = { phase: run.phase, escalationReason: run.escalationReason, activeRules: clone(run.activeRules) };
       round.result = score(round, run);
       for (const [username, points] of Object.entries(round.result.pointsByUsername)) run.participants[username].totalPoints += points;
       if (run.phase === "NORMAL") {
@@ -554,9 +615,27 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (activeParticipants(run).length <= 1) {
         run.status = "FINISHED";
         run.finishedAt = iso(now);
+        run.finishedBy = "REVEAL";
         archive(next, "FINISH", now);
       }
       if (run.status !== "FINISHED") run.status = "ROUND_REVEALED";
+      changed = true;
+      break;
+    }
+    case "CANCEL_ROUND_RESULT": {
+      const canCancelFinishedResult = run.status === "FINISHED" && run.finishedBy === "REVEAL";
+      if ((run.status !== "ROUND_REVEALED" && !canCancelFinishedResult) || !currentRound(run)?.result) throw new RoomError("INVALID_TRANSITION");
+      const round = currentRound(run)!;
+      if (run.escalationReason === "HOST" && round.revealStateBefore?.escalationReason !== "HOST") {
+        throw new RoomError("INVALID_TRANSITION", "The result cannot be cancelled after escalation has started.");
+      }
+      cancelRoundResult(run);
+      if (canCancelFinishedResult) {
+        run.finishedAt = null;
+        run.finishedBy = null;
+        run.archivedAt = null;
+        next.archives = next.archives.filter((archive) => archive.runId !== run.id);
+      }
       changed = true;
       break;
     }
@@ -579,6 +658,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (run.status === "FINISHED") throw new RoomError("INVALID_TRANSITION");
       run.status = "FINISHED";
       run.finishedAt = iso(now);
+      run.finishedBy = "HOST";
       archive(next, "FINISH", now);
       changed = true;
       break;
@@ -644,8 +724,9 @@ export function publicArchive(room: Room, options: { hideOpenRoundPicks?: boolea
       participants: Object.values(run.participants).map(clone),
       participationLocked: run.participationLocked,
       settingsForNextRound: clone(run.settingsForNextRound),
-      rounds: run.rounds.map(({ disqualifiedUsernames, ...round }) => {
+      rounds: run.rounds.map(({ disqualifiedUsernames, revealStateBefore, ...round }) => {
         void disqualifiedUsernames;
+        void revealStateBefore;
         return round.number === hiddenRound ? { ...clone(round), picks: {} } : clone(round);
       }),
       createdAt: run.createdAt,

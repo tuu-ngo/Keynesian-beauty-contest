@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostCommandSchema, stateResponseSchema, type HostCommand } from "@/contracts";
-import { applyCommand, createRoom, project, publicArchive, registerPlayer, submitPick, type Room } from "@/lib/room";
+import { applyCommand, createRoom, project, publicArchive, registerPlayer, resolveDeadline, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
 
@@ -115,6 +115,94 @@ describe("room model", () => {
     if (resetPlayerView.view === "player") expect(resetPlayerView.self.currentPickTenths).toBeNull();
   });
 
+  it("lets the host cancel a revealed result and restores the prior round state", () => {
+    let game = joinAll(room());
+    game.run.settingsForNextRound.startPoints = 20;
+    game.run.settingsForNextRound.losePoints = 10;
+    game = command(game, "OPEN_ROUND").room;
+    for (const [username, value] of Object.entries({ ada: 15, bea: 20, cy: 25 })) {
+      game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+    game = command(game, "LOCK_ROUND").room;
+    game = command(game, "REVEAL_ROUND").room;
+    expect(game.run.participants.ada.totalPoints).toBe(30);
+
+    game = command(game, "CANCEL_ROUND_RESULT").room;
+    expect(game.run.status).toBe("ROUND_LOCKED");
+    expect(game.run.rounds[0].result).toBeNull();
+    expect(game.run.rounds[0].revealedAt).toBeNull();
+    expect(game.run.participants.ada.totalPoints).toBe(20);
+    expect(game.run.participants.bea).toMatchObject({ totalPoints: 20, status: "ACTIVE", eliminatedInRound: null });
+    expect(project(game, "public", NOW).revealedRounds).toEqual([]);
+  });
+
+  it("cancels a Nash result and restores normal play", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    for (const username of ["ada", "bea", "cy"]) {
+      game = submitPick(game, { username, runId: game.run.id, round: 1, value: 0, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+    game = command(game, "LOCK_ROUND").room;
+    game = command(game, "REVEAL_ROUND").room;
+    expect(game.run).toMatchObject({ phase: "ESCALATION", escalationReason: "NASH", activeRules: [1] });
+
+    game = command(game, "CANCEL_ROUND_RESULT").room;
+    expect(game.run).toMatchObject({ status: "ROUND_LOCKED", phase: "NORMAL", escalationReason: null, activeRules: [] });
+  });
+
+  it("cancels an escalation result without undoing an earlier escalation transition", () => {
+    let game = joinAll(room());
+    game.run.settingsForNextRound.startPoints = 0;
+    game = command(game, "OPEN_ROUND").room;
+    for (const [username, value] of Object.entries({ ada: 10, bea: 20, cy: 60 })) {
+      game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+    game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    game = command(game, "START_ESCALATION").room;
+    game = command(game, "OPEN_ROUND").room;
+    for (const [username, value] of Object.entries({ ada: 0, bea: 100, cy: 50 })) {
+      game = submitPick(game, { username, runId: game.run.id, round: 2, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+    game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    const eliminated = game.run.rounds[1].result?.eliminatedUsername;
+    expect(eliminated).not.toBeNull();
+    expect(game.run.activeRules).toEqual([1, 2]);
+
+    game = command(game, "CANCEL_ROUND_RESULT").room;
+    expect(game.run).toMatchObject({ status: "ROUND_LOCKED", phase: "ESCALATION", escalationReason: "HOST", activeRules: [1] });
+    expect(game.run.participants[eliminated!]).toMatchObject({ status: "ACTIVE", eliminatedInRound: null });
+  });
+
+  it("does not offer cancellation after the host starts escalation from a revealed result", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    game = command(game, "LOCK_ROUND").room;
+    game = command(game, "REVEAL_ROUND").room;
+    game = command(game, "START_ESCALATION").room;
+    const host = project(game, "host", NOW);
+    if (host.view !== "host") throw new Error("Expected host projection.");
+    expect(host.canCancelRoundResult).toBe(false);
+  });
+
+  it("lets the host cancel an automatically finishing result", () => {
+    let game = joinAll(room());
+    game.run.settingsForNextRound = { ...game.run.settingsForNextRound, startPoints: 10, losePoints: 10 };
+    game = command(game, "OPEN_ROUND").room;
+    for (const [username, value] of Object.entries({ ada: 15, bea: 20, cy: 25 })) {
+      game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+    game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    expect(game.run).toMatchObject({ status: "FINISHED", finishedBy: "REVEAL" });
+    const host = project(game, "host", NOW);
+    if (host.view !== "host") throw new Error("Expected host projection.");
+    expect(host.canCancelRoundResult).toBe(true);
+    expect(game.archives).toHaveLength(1);
+
+    game = command(game, "CANCEL_ROUND_RESULT").room;
+    expect(game.run).toMatchObject({ status: "ROUND_LOCKED", finishedAt: null, finishedBy: null, archivedAt: null });
+    expect(game.archives).toEqual([]);
+  });
+
   it("ranks by points when the host finishes early", () => {
     let game = joinAll(room());
     game.run.participants.ada.totalPoints = 20;
@@ -144,6 +232,24 @@ describe("room model", () => {
     expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({});
     game = command(game, "LOCK_ROUND").room;
     expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 130 });
+  });
+
+  it("lets the host stop, resume, and reset an open round timer", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    const deadline = game.run.rounds[0].deadlineAt;
+
+    game = applyCommand(game, { type: "PAUSE_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 10_000, "seed").room;
+    expect(game.run.rounds[0]).toMatchObject({ timerPaused: true, pausedRemainingMs: 50_000, deadlineAt: deadline });
+    expect(resolveDeadline(game, NOW + 120_000).run.status).toBe("ROUND_OPEN");
+    const paused = project(game, "host", NOW + 120_000);
+    expect(paused.currentRound).toMatchObject({ timerPaused: true, pausedRemainingMs: 50_000 });
+
+    game = applyCommand(game, { type: "RESUME_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 120_000, "seed").room;
+    expect(game.run.rounds[0]).toMatchObject({ timerPaused: false, pausedRemainingMs: null, deadlineAt: new Date(NOW + 170_000).toISOString() });
+
+    game = applyCommand(game, { type: "RESET_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 130_000, "seed").room;
+    expect(game.run.rounds[0]).toMatchObject({ timerPaused: false, pausedRemainingMs: null, deadlineAt: new Date(NOW + 190_000).toISOString() });
   });
 
   it("drops stale pick and command receipts so the snapshot does not grow all game", () => {

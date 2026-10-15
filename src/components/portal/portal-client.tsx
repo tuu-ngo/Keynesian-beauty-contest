@@ -60,7 +60,7 @@ function Lobby({ game }: { game: PublicProjection }) {
 function OpenRound({ game }: { game: PublicProjection }) {
   const round = game.currentRound;
   if (!round) return null;
-  return <section className="portal-stage portal-open"><p className="eyeline">Round {round.number}</p><h1>Choose for the room.</h1><p className="stage-rule">Closest to {multiplier(round.settings.p)} of the average wins.</p><Countdown className="portal-countdown" deadlineAt={round.deadlineAt} serverNow={game.serverNow} /><p className="portal-progress"><strong>{game.submittedCount}</strong> of {game.activeCount} submitted</p><RosterWall game={game} progress /></section>;
+  return <section className="portal-stage portal-open"><p className="eyeline">Round {round.number}</p><h1>Choose for the room.</h1><p className="stage-rule">Closest to {multiplier(round.settings.p)} of the average wins.</p><Countdown className="portal-countdown" deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /><p className="portal-progress">{round.timerPaused && "Timer stopped · "}<strong>{game.submittedCount}</strong> of {game.activeCount} submitted</p><RosterWall game={game} progress /></section>;
 }
 
 function Locked({ game }: { game: PublicProjection }) {

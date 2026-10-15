@@ -79,7 +79,7 @@ function PlayerStage({ game, token, onAnnouncement, refresh }: { game: PlayerPro
   const result = latestResult(game);
   if (game.status === "LOBBY") return <section className="player-stage"><p className="eyeline">You&apos;re in</p><h1>Waiting in the lobby</h1><p>{game.players.length ? `${game.players.length} participant${game.players.length === 1 ? "" : "s"} joined. The host will open round one when everyone is ready.` : "No players have joined yet."}</p></section>;
   if (game.status === "ROUND_OPEN" && game.self.status === "ACTIVE" && game.currentRound) return <PickForm game={game} token={token} refresh={refresh} onAnnouncement={onAnnouncement} />;
-  if (game.status === "ROUND_OPEN" && game.currentRound) return <section className="player-stage"><p className="eyeline">Round {game.currentRound.number}</p><h1>You&apos;re spectating</h1><p>You were eliminated, but you can follow every result here.</p><p className="countdown"><Countdown deadlineAt={game.currentRound.deadlineAt} serverNow={game.serverNow} /></p><p>{game.submittedCount} of {game.activeCount} active players have submitted.</p></section>;
+  if (game.status === "ROUND_OPEN" && game.currentRound) return <section className="player-stage"><p className="eyeline">Round {game.currentRound.number}</p><h1>You&apos;re spectating</h1><p>You were eliminated, but you can follow every result here.</p><p className="countdown"><Countdown deadlineAt={game.currentRound.deadlineAt} serverNow={game.serverNow} paused={game.currentRound.timerPaused} pausedRemainingMs={game.currentRound.pausedRemainingMs} /></p><p>{game.currentRound.timerPaused ? "Timer stopped by the Host. " : ""}{game.submittedCount} of {game.activeCount} active players have submitted.</p></section>;
   if (game.status === "ROUND_LOCKED") return <section className="player-stage"><p className="eyeline">Round {game.currentRound?.number ?? ""}</p><h1>Picks are locked.</h1><p>{game.self.currentPickTenths === null ? "You did not save a pick this round." : `Your last saved pick was ${tenths(game.self.currentPickTenths)}.`} The host will reveal the result shortly.</p></section>;
   if (result) return <PlayerResult game={game} />;
   return <section className="player-stage"><h1>Waiting for the result</h1><p>The latest confirmed game state is shown here.</p></section>;
@@ -95,7 +95,7 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
   const [now, setNow] = useState(Date.parse(game.serverNow));
   useEffect(() => { setValue(saved === null ? "50" : String(saved / 10)); }, [round.number, saved]);
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []);
-  const timeUp = Boolean(round.deadlineAt && now >= Date.parse(round.deadlineAt));
+  const timeUp = Boolean(round.deadlineAt && !round.timerPaused && now >= Date.parse(round.deadlineAt));
   const numeric = Number(value);
   const valid = Number.isInteger(numeric) && numeric >= round.settings.min && numeric <= round.settings.max;
   async function submit(event: FormEvent) {
@@ -112,7 +112,7 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
   }
   return <form className="pick-form" onSubmit={submit}>
     <div><p className="eyeline">Round {round.number}</p><h1>Make your pick</h1><p>{ruleSentence(round.settings.p)}</p></div>
-    <div className="round-detail"><span>{game.submittedCount} of {game.activeCount} submitted</span><Countdown deadlineAt={round.deadlineAt} serverNow={game.serverNow} /></div>
+    <div className="round-detail"><span>{game.submittedCount} of {game.activeCount} submitted{round.timerPaused ? " · Timer stopped" : ""}</span><Countdown deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /></div>
     <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => setValue(String(Math.max(round.settings.min, (Number.isFinite(numeric) ? Math.round(numeric) : 50) - 1)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="numeric" min={round.settings.min} max={round.settings.max} step={1} value={value} onChange={(event) => setValue(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => setValue(String(Math.min(round.settings.max, (Number.isFinite(numeric) ? Math.round(numeric) : 50) + 1)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, as a whole number.</small></label>
     <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={1} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => setValue(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
     {timeUp && <p className="form-message" id="pick-message">Time is up. Waiting for the game to lock.</p>}
