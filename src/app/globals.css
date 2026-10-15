@@ -419,3 +419,19 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
   .leaderboard li { grid-template-columns: 36px 1fr auto; }
   .leaderboard li span:nth-child(3) { display: none; }
 }
+
+/* Host leaderboard: sized to stay readable when the host screen is projected. */
+.live-board { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 22px; }
+.live-board > div { border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-surface); padding: 20px 22px; box-shadow: var(--nb-shadow); }
+.live-board h2 { margin: 0 0 12px; font-size: 28px; }
+.live-board ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.live-board li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 10px 0; font-size: 26px; font-weight: 700; }
+.live-board li + li { border-top: 1.5px dashed var(--nb-muted); }
+.live-board li.is-out { opacity: 0.5; text-decoration: line-through; }
+.live-board__rank { font-family: var(--nb-font-mono); font-size: 24px; }
+.live-board__name { display: flex; min-width: 0; flex-direction: column; overflow: hidden; text-overflow: ellipsis; }
+.live-board__name small { display: inline-flex; align-items: center; gap: 6px; color: var(--nb-muted); font-size: 15px; font-weight: 600; }
+.live-board strong { font-family: var(--nb-font-mono); font-size: 30px; }
+.live-board strong small { font-size: 14px; }
+.live-board__teams li { font-size: 22px; }
+@media (max-width: 900px) { .live-board { grid-template-columns: minmax(0, 1fr); } }

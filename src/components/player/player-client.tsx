@@ -97,10 +97,10 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []);
   const timeUp = Boolean(round.deadlineAt && now >= Date.parse(round.deadlineAt));
   const numeric = Number(value);
-  const valid = Number.isFinite(numeric) && numeric >= round.settings.min && numeric <= round.settings.max && Math.abs(numeric * 10 - Math.round(numeric * 10)) < 1e-8;
+  const valid = Number.isInteger(numeric) && numeric >= round.settings.min && numeric <= round.settings.max;
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!valid) { setSavedOk(false); setMessage(`Enter a value from ${round.settings.min} to ${round.settings.max} in ${round.settings.step} steps.`); return; }
+    if (!valid) { setSavedOk(false); setMessage(`Enter a whole number from ${round.settings.min} to ${round.settings.max}.`); return; }
     setBusy(true); setMessage(""); setSavedOk(false); onAnnouncement("Saving pick");
     try {
       await roomRequest("/api/room/pick", { method: "PUT", headers: authHeaders(token), body: { runId: game.runId, round: round.number, value: numeric, requestId: crypto.randomUUID() } });
@@ -113,8 +113,8 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
   return <form className="pick-form" onSubmit={submit}>
     <div><p className="eyeline">Round {round.number}</p><h1>Make your pick</h1><p>{ruleSentence(round.settings.p)}</p></div>
     <div className="round-detail"><span>{game.submittedCount} of {game.activeCount} submitted</span><Countdown deadlineAt={round.deadlineAt} serverNow={game.serverNow} /></div>
-    <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => setValue(String(Math.max(round.settings.min, Math.round((numeric - round.settings.step) * 10) / 10)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="decimal" min={round.settings.min} max={round.settings.max} step={round.settings.step} value={value} onChange={(event) => setValue(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => setValue(String(Math.min(round.settings.max, Math.round((numeric + round.settings.step) * 10) / 10)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, in {round.settings.step} increments.</small></label>
-    <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={round.settings.step} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => setValue(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
+    <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => setValue(String(Math.max(round.settings.min, (Number.isFinite(numeric) ? Math.round(numeric) : 50) - 1)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="numeric" min={round.settings.min} max={round.settings.max} step={1} value={value} onChange={(event) => setValue(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => setValue(String(Math.min(round.settings.max, (Number.isFinite(numeric) ? Math.round(numeric) : 50) + 1)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, as a whole number.</small></label>
+    <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={1} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => setValue(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
     {timeUp && <p className="form-message" id="pick-message">Time is up. Waiting for the game to lock.</p>}
     {!timeUp && message && <p className={`form-message ${savedOk ? "form-message--ok" : ""}`} id="pick-message">{message}</p>}
     <button className="button button--primary" disabled={busy || timeUp}>{busy ? "Saving pick…" : saved === null ? "Save pick" : "Update pick"}</button>
