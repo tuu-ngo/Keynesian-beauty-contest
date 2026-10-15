@@ -93,21 +93,23 @@ function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy:
   const [winPoints, setWinPoints] = useState(String(saved.winPoints ?? 10));
   const [losePoints, setLosePoints] = useState(String(saved.losePoints ?? 0));
   const [maxPoints, setMaxPoints] = useState(saved.maxPoints == null ? "" : String(saved.maxPoints));
+  const [startPoints, setStartPoints] = useState(String(saved.startPoints ?? 0));
   useEffect(() => {
     setP(saved.p); setTimer(timerText(saved.timerSeconds));
-    setWinPoints(String(saved.winPoints ?? 10)); setLosePoints(String(saved.losePoints ?? 0)); setMaxPoints(saved.maxPoints == null ? "" : String(saved.maxPoints));
-  }, [saved.p, saved.timerSeconds, saved.winPoints, saved.losePoints, saved.maxPoints]);
+    setWinPoints(String(saved.winPoints ?? 10)); setLosePoints(String(saved.losePoints ?? 0)); setMaxPoints(saved.maxPoints == null ? "" : String(saved.maxPoints)); setStartPoints(String(saved.startPoints ?? 0));
+  }, [saved.p, saved.timerSeconds, saved.winPoints, saved.losePoints, saved.maxPoints, saved.startPoints]);
   function submit(event: FormEvent) {
     event.preventDefault();
     const seconds = timer === "off" ? null : (Number(timer) as 60 | 90 | 120);
     const cap = maxPoints.trim() === "" ? null : Number(maxPoints);
-    void onSave({ p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), maxPoints: cap });
+    void onSave({ p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), maxPoints: cap, startPoints: Number(startPoints) });
   }
   return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="90">90 seconds</option><option value="120">120 seconds</option><option value="off">Off</option></select></label>
+    <label><span>Starting points (0 = no elimination by points)</span><input type="number" inputMode="numeric" min={0} max={100000} step={1} required value={startPoints} onChange={(event) => setStartPoints(event.target.value)} disabled={game.status !== "LOBBY"} /></label>
     <label><span>Points per win</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={winPoints} onChange={(event) => setWinPoints(event.target.value)} /></label>
     <label><span>Points lost per loss</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={losePoints} onChange={(event) => setLosePoints(event.target.value)} /></label>
     <label><span>Max points per player</span><input type="number" inputMode="numeric" min={1} max={100000} step={1} placeholder="No limit" value={maxPoints} onChange={(event) => setMaxPoints(event.target.value)} /></label>
-    <p>Changes apply to the next round. The open round keeps its saved settings. A loss only counts in rounds that have a winner; totals never go below 0.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
+    <p>Changes apply to the next round. The open round keeps its saved settings. A loss only counts in rounds that have a winner; a player who reaches 0 points is eliminated (starting points apply in the lobby only).</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
 }
 
 function LiveLeaderboard({ game }: { game: HostProjection }) {

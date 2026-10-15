@@ -129,6 +129,7 @@ function PlayerResult({ game }: { game: PlayerProjection }) {
     <div className="metric-pair"><Metric label="Average" value={decimal(result.average)} /><Metric label="Target" value={decimal(result.target)} /></div>
     <div className="personal-result"><p>Your pick <strong>{tenths(game.self.currentPickTenths)}</strong></p><p>Points this round <strong>{roundDelta > 0 ? `+${roundDelta}` : roundDelta}</strong></p><p>Total points <strong>{game.self.totalPoints}</strong></p></div>
     <p>{result.winners.length ? `Winner${result.winners.length === 1 ? "" : "s"}: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p>
+    {result.pointEliminatedUsernames.includes(game.self.username) && <p className="notice notice--danger">You ran out of points and are out of the game. You can keep following as a spectator.</p>}
     {result.eliminatedUsername && <p className="notice notice--danger">{result.eliminatedUsername} was eliminated. {game.self.status === "ELIMINATED" ? "You can keep following as a spectator." : ""}</p>}
     {game.escalationReason === "NASH" && <p className="notice">The group reached Nash equilibrium. Escalation rules apply next round.</p>}
     {game.escalationReason === "HOST" && <p className="notice">The host started escalation. Escalation rules apply next round.</p>}
