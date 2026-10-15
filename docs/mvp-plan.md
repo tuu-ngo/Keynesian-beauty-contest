@@ -55,8 +55,8 @@ M1a–M1d là bốn luồng triển khai độc lập **sau** khi M0 được me
 
 ### M1c/M1d — Giao diện
 
-1. Player: đăng nhập, khôi phục token, vào lại sảnh sau reset, chờ, gửi/sửa pick đến lock, xem kết quả riêng, loại trở thành spectator. Thiết kế điện thoại rộng 360px trở lên.
-2. Host: đăng nhập bằng account env, tạo room nếu chưa có, xem roster/team, điều khiển, đổi `p`/timer giữa vòng, reset và chọn run để xuất.
+1. Player: đăng nhập, khôi phục token, vào lại sảnh sau reset, chờ, gửi/sửa pick và stake nguyên tử đến lock, xem kết quả riêng, loại trở thành spectator. Thiết kế điện thoại rộng 360px trở lên.
+2. Host: đăng nhập bằng account env, tạo room nếu chưa có, xem roster/team, điều khiển, đổi loại round (`STANDARD | WAGER`), `p`/timer giữa vòng, reset và chọn run để xuất.
 3. Portal: nội dung công khai theo trạng thái, QR, tên/đội, số đã gửi, countdown, reveal/histogram/trend, thông báo Nash hoặc Host escalation, điểm cá nhân/đội, kết thúc. Chạy 16:9 không cuộn.
 4. Shared polling hook 1 giây, `If-None-Match`, jitter, hủy request cũ, reconnect và đồng bộ lại; không có WebSocket trong MVP.
 

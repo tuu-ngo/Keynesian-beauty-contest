@@ -16,6 +16,8 @@ export type RunPhase = "NORMAL" | "ESCALATION";
 export interface InternalRound extends Round {
   /** Server-only until the round has been revealed. Values are integer tenths. */
   picks: Record<string, number>;
+  /** Server-only while open. Values are whole virtual points and are settled at reveal. */
+  stakes: Record<string, number>;
   /** Rule 1 needs this audit field; it is intentionally not part of the public result. */
   disqualifiedUsernames: string[];
   /** State changed by REVEAL_ROUND; retained only so the Host can undo that reveal safely. */
@@ -91,6 +93,7 @@ export interface CommandResult {
 export interface PickResult {
   acceptedVersion: number;
   pick: number;
+  stake: number;
 }
 
 export interface PublicArchive {
@@ -132,6 +135,7 @@ export interface TeamLeaderboardRow {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
+  roundMode: "STANDARD",
   p: "0.8",
   min: 0,
   max: 100,
@@ -298,6 +302,7 @@ export const DEFAULT_PICK_TENTHS = 500;
 function fillDefaultPicks(run: Run, round: InternalRound): void {
   for (const participant of activeParticipants(run)) {
     round.picks[participant.username] ??= DEFAULT_PICK_TENTHS;
+    (round.stakes ??= {})[participant.username] ??= 0;
   }
 }
 
@@ -381,7 +386,11 @@ function score(round: InternalRound, run: Run): RoundResult {
   const entries = Object.entries(round.picks).filter(([username]) => run.participants[username]?.status === "ACTIVE");
   if (entries.length === 0) {
     round.disqualifiedUsernames = [];
-    return { average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null, eliminationCandidates: [], pointEliminatedUsernames: [], pointsByUsername: {} };
+    return {
+      average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null,
+      eliminationCandidates: [], pointEliminatedUsernames: [], pointsByUsername: {},
+      basePointsByUsername: {}, wagerPointsByUsername: {}, payoutsByUsername: {}, wagerPot: 0, wagerRefunded: false,
+    };
   }
   const sum = entries.reduce((total, [, value]) => total + value, 0);
   const numberOfPicks = BigInt(entries.length);
@@ -421,12 +430,51 @@ function score(round: InternalRound, run: Run): RoundResult {
   const winPoints = round.settings.winPoints ?? DEFAULT_ROUND_SETTINGS.winPoints;
   const losePoints = round.settings.losePoints ?? DEFAULT_ROUND_SETTINGS.losePoints;
   const winnerSet = new Set(winners);
+  const stakes = round.stakes ?? {};
+  const wagerRound = (round.settings.roundMode ?? "STANDARD") === "WAGER";
+  const wagerPot = wagerRound
+    ? activeParticipants(run).reduce((total, participant) => total + (stakes[participant.username] ?? 0), 0)
+    : 0;
+  const stakedWinners = winners.filter((username) => (stakes[username] ?? 0) > 0).sort();
+  const payoutsByUsername: Record<string, number> = {};
+  const wagerRefunded = wagerRound && wagerPot > 0 && stakedWinners.length === 0;
+
+  if (wagerRefunded) {
+    for (const participant of activeParticipants(run)) {
+      const stake = stakes[participant.username] ?? 0;
+      if (stake > 0) payoutsByUsername[participant.username] = stake;
+    }
+  } else if (wagerRound && wagerPot > 0 && stakedWinners.length > 0) {
+    const winningStake = stakedWinners.reduce((total, username) => total + (stakes[username] ?? 0), 0);
+    const shares = stakedWinners.map((username) => {
+      const numerator = wagerPot * (stakes[username] ?? 0);
+      const payout = Math.floor(numerator / winningStake);
+      return { username, payout, remainder: numerator % winningStake };
+    });
+    let remaining = wagerPot - shares.reduce((total, share) => total + share.payout, 0);
+    shares.sort((left, right) => right.remainder - left.remainder || left.username.localeCompare(right.username));
+    for (const share of shares) {
+      if (remaining > 0) { share.payout += 1; remaining -= 1; }
+      payoutsByUsername[share.username] = share.payout;
+    }
+  }
+
   const pointsByUsername: Record<string, number> = {};
+  const basePointsByUsername: Record<string, number> = {};
+  const wagerPointsByUsername: Record<string, number> = {};
   for (const participant of activeParticipants(run)) {
-    const raw = winnerSet.has(participant.username) ? winPoints : winners.length > 0 ? -losePoints : 0;
+    const stake = wagerRound ? (stakes[participant.username] ?? 0) : 0;
+    const payout = payoutsByUsername[participant.username] ?? 0;
     const total = participant.totalPoints;
-    // A total never drops below 0.
-    const next = Math.max(0, total + raw);
+    const afterWager = total - stake + payout;
+    const rawBase = winnerSet.has(participant.username) ? winPoints : winners.length > 0 ? -losePoints : 0;
+    // Stake was validated against the pre-round balance. Apply base scoring
+    // after the conserved pot settlement, with the existing zero floor.
+    const next = Math.max(0, afterWager + rawBase);
+    const wagerDelta = afterWager - total;
+    const baseDelta = next - afterWager;
+    if (wagerDelta !== 0) wagerPointsByUsername[participant.username] = wagerDelta;
+    if (baseDelta !== 0) basePointsByUsername[participant.username] = baseDelta;
     if (next !== total) pointsByUsername[participant.username] = next - total;
   }
   return {
@@ -438,6 +486,11 @@ function score(round: InternalRound, run: Run): RoundResult {
     eliminationCandidates: [],
     pointEliminatedUsernames: [],
     pointsByUsername,
+    basePointsByUsername,
+    wagerPointsByUsername,
+    payoutsByUsername,
+    wagerPot,
+    wagerRefunded,
   };
 }
 
@@ -552,7 +605,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       next.pickReceipts = {};
       const settings = clone(run.settingsForNextRound);
       const openedAt = iso(now);
-      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, disqualifiedUsernames: [], revealStateBefore: null });
+      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, stakes: {}, disqualifiedUsernames: [], revealStateBefore: null });
       run.status = "ROUND_OPEN";
       changed = true;
       break;
@@ -692,11 +745,12 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
   return { room: next, result, changed };
 }
 
-export function submitPick(room: Room, args: { username: string; runId: string; round: number; value: number; requestId: string; now: number }): { room: Room; result: PickResult; changed: boolean } {
+export function submitPick(room: Room, args: { username: string; runId: string; round: number; value: number; stake?: number; requestId: string; now: number }): { room: Room; result: PickResult; changed: boolean } {
   const duplicate = room.pickReceipts[args.username]?.[args.requestId];
   if (duplicate) {
     if (duplicate.runId !== args.runId) throw new RoomError("RUN_MISMATCH", "This request id belongs to an earlier run.");
-    return { room, result: duplicate.response, changed: false };
+    // Receipts persisted before wager rounds did not include a stake.
+    return { room, result: { ...duplicate.response, stake: duplicate.response.stake ?? 0 }, changed: false };
   }
   const next = resolveDeadline(clone(room), args.now);
   if (next.run.id !== args.runId) throw new RoomError("RUN_MISMATCH");
@@ -707,10 +761,16 @@ export function submitPick(room: Room, args: { username: string; runId: string; 
   if (!participant || participant.status !== "ACTIVE") throw new RoomError("FORBIDDEN", "Only active participants may submit a pick.");
   const valueTenths = exactTenths(args.value);
   if (valueTenths === null) throw new RoomError("VALIDATION_ERROR", "Pick must be a whole number from 0 to 100.");
+  const stake = args.stake ?? 0;
+  if (!Number.isInteger(stake) || stake < 0) throw new RoomError("VALIDATION_ERROR", "Stake must be a non-negative whole number.");
+  const wagerRound = (round.settings.roundMode ?? "STANDARD") === "WAGER";
+  if (!wagerRound && stake !== 0) throw new RoomError("VALIDATION_ERROR", "A stake is only allowed in a wager round.");
+  if (stake > participant.totalPoints) throw new RoomError("VALIDATION_ERROR", "Stake cannot exceed your current points.");
   round.picks[args.username] = valueTenths;
+  (round.stakes ??= {})[args.username] = wagerRound ? stake : 0;
   next.version += 1;
   next.updatedAt = iso(args.now);
-  const result = { acceptedVersion: next.version, pick: valueTenths };
+  const result = { acceptedVersion: next.version, pick: valueTenths, stake: wagerRound ? stake : 0 };
   (next.pickReceipts[args.username] ??= {})[args.requestId] = { runId: args.runId, response: result };
   return { room: next, result, changed: true };
 }
@@ -736,7 +796,8 @@ export function publicArchive(room: Room, options: { hideOpenRoundPicks?: boolea
       rounds: run.rounds.map(({ disqualifiedUsernames, revealStateBefore, ...round }) => {
         void disqualifiedUsernames;
         void revealStateBefore;
-        return round.number === hiddenRound ? { ...clone(round), picks: {} } : clone(round);
+        const exported = { ...clone(round), stakes: clone(round.stakes ?? {}) };
+        return round.number === hiddenRound ? { ...exported, picks: {}, stakes: {} } : exported;
       }),
       createdAt: run.createdAt,
       finishedAt: run.finishedAt,
@@ -752,7 +813,7 @@ export function csvForArchive(archive: PublicArchive): string {
     const text = value === null || value === undefined ? "" : String(value);
     return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   };
-  const rows = [["runId", "round", "username", "displayName", "teamId", "pick", "distance", "points", "winner", "eliminated"]];
+  const rows = [["runId", "round", "roundMode", "username", "displayName", "teamId", "pick", "distance", "stake", "payout", "wagerPoints", "basePoints", "points", "winner", "eliminated"]];
   for (const round of archive.run.rounds.filter((candidate) => candidate.result !== null)) {
     const result = round.result!;
     const submitted = Object.values(round.picks);
@@ -767,11 +828,16 @@ export function csvForArchive(archive: PublicArchive): string {
       rows.push([
         archive.run.id,
         String(round.number),
+        round.settings.roundMode ?? "STANDARD",
         participant.username,
         participant.displayName,
         participant.teamId,
         pick === undefined ? "" : String(pick / 10),
         distance ?? "",
+        String(round.stakes?.[participant.username] ?? 0),
+        String(result.payoutsByUsername?.[participant.username] ?? 0),
+        String(result.wagerPointsByUsername?.[participant.username] ?? 0),
+        String(result.basePointsByUsername?.[participant.username] ?? result.pointsByUsername[participant.username] ?? 0),
         String(result.pointsByUsername[participant.username] ?? 0),
         String(result.winners.includes(participant.username)),
         String(result.eliminatedUsername === participant.username),

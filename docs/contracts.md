@@ -38,6 +38,7 @@ type Phase = 'NORMAL' | 'ESCALATION';
 type Status = 'LOBBY' | 'ROUND_OPEN' | 'ROUND_LOCKED' | 'ROUND_REVEALED' | 'FINISHED';
 type RuleId = 1 | 2;
 type P = '0.8' | '2/3' | '1/2';
+type RoundMode = 'STANDARD' | 'WAGER';
 
 type Team = { id: string; name: string; image?: string; color?: string };
 type Account = { username: string; displayName: string; teamId: string };
@@ -48,6 +49,7 @@ type Participant = Account & {
   totalPoints: number;
 };
 type RoundSettings = {
+  roundMode: RoundMode; // default STANDARD; Host chọn cho vòng kế tiếp
   p: P; min: 0; max: 100; step: 0.1;
   timerSeconds: number | null; // 60 | 90 | 120 from the host UI (default 60); null = off
   winPoints: number;  // default 10
@@ -63,6 +65,11 @@ type RoundResult = {
   eliminationCandidates: string[];
   pointEliminatedUsernames: string[]; // eliminated this round because their points reached 0
   pointsByUsername: Record<string, number>; // signed delta actually applied (after the zero floor); omitted when 0
+  basePointsByUsername: Record<string, number>;
+  wagerPointsByUsername: Record<string, number>; // payout - stake
+  payoutsByUsername: Record<string, number>;
+  wagerPot: number;
+  wagerRefunded: boolean;
 };
 type Round = {
   number: number;
@@ -111,6 +118,11 @@ type RevealedRound = {
   target: string | null; picks: RevealedPick[];
   winners: { username: string; valueTenths: number; points: number }[];
   eliminatedUsername: string | null;
+  stakesByUsername: Record<string, number>;
+  payoutsByUsername: Record<string, number>;
+  wagerPointsByUsername: Record<string, number>;
+  basePointsByUsername: Record<string, number>;
+  wagerPot: number; wagerRefunded: boolean;
 };
 type PublicFields = {
   schemaVersion: 1; code: string; runId: string; runNumber: number;
@@ -126,12 +138,12 @@ type PublicFields = {
 type PublicProjection = PublicFields & { view: 'public' };
 type PlayerProjection = PublicFields & {
   view: 'player';
-  self: { username: string; currentPickTenths: number | null; totalPoints: number;
+  self: { username: string; currentPickTenths: number | null; currentStakePoints: number; totalPoints: number;
     status: 'ACTIVE' | 'ELIMINATED'; eliminatedInRound: number | null };
 };
 type HostProjection = PublicFields & {
   view: 'host';
-  hostPicks: { username: string; valueTenths: number }[] | null;
+  hostPicks: { username: string; valueTenths: number; stakePoints: number }[] | null;
 };
 type StateResponse = PublicProjection | PlayerProjection | HostProjection;
 ```
@@ -145,7 +157,7 @@ Máy trạng thái: `LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED �
 ```ts
 type HostCommand = { commandId: string; expectedVersion: number } & (
   | { type: 'OPEN_ROUND' | 'LOCK_ROUND' | 'REVEAL_ROUND' | 'START_ESCALATION' | 'FINISH' | 'RESET' }
-  | { type: 'UPDATE_SETTINGS'; payload: { p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number } }
+  | { type: 'UPDATE_SETTINGS'; payload: { roundMode?: RoundMode; p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number } }
 );
 ```
 
@@ -163,6 +175,7 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 - Sau reset, token Player cũ vẫn xác thực account nhưng account phải vào sảnh của `runId` mới để thành participant. App đang mở tự gọi lệnh join cho run mới; account offline không tự được tính. `join` sau khi mở vòng 1 chỉ hợp lệ với participant đã nằm trong run đó (để khôi phục phiên), không thêm người mới.
 - Tất cả phép so sánh pick dùng số nguyên phần mười. `p` là phân số chính xác `4/5`, `2/3` hoặc `1/2`; trung bình, target và khoảng cách được so sánh bằng phân số/số nguyên, chỉ làm tròn khi trình bày.
 - Người chưa bấm lưu khi vòng bị khóa (Host khóa hoặc hết giờ) được tính pick mặc định `50`, giống giá trị form hiển thị; vì vậy luôn có pick khi có từ 2 người chơi. Nếu vẫn không có pick: `average = target = null`, không có winner. Hòa gần target: mọi người hòa đều thắng và mỗi người +10. Bonus suýt thắng tắt trong MVP.
+- Với vòng `WAGER`, request lưu pick nhận thêm `stake` là số nguyên `0..totalPoints`. Pick và stake được thay thế atomically. Khi reveal: trừ stake → chia toàn bộ pot cho winner có stake theo tỷ lệ → áp dụng điểm thắng/thua cơ bản với sàn 0. Phần điểm không chia hết dùng largest-remainder, hòa phần dư ưu tiên username tăng dần. Không có winner đặt stake thì hoàn toàn bộ stake. Stake mặc định khi lock là `0`.
 - Điều kiện Nash: sau reveal trong NORMAL, ít nhất 2 active và **tất cả active** đã chọn đúng `0`. Khi đó phase chuyển sang ESCALATION, hiện thông báo Nash, Rule 1 áp dụng từ vòng kế. Chuyển thủ công chỉ được ghi `HOST` và không được ghi là Nash.
 - ESCALATION: pick trùng vẫn vào trung bình nhưng người chọn trùng bị Rule 1 loại khỏi tập thắng. Nếu có `0` và đúng một `100` đủ điều kiện sau Rule 1, Rule 2 cho `100` thắng; nếu không, xét người còn đủ điều kiện gần target nhất. Không có ai đủ điều kiện thì không có winner. Sau mỗi vòng B loại đúng một active khác winner; ưu tiên người không gửi → người trùng → người thua còn lại, rồi khoảng cách xa target nhất, cuối cùng seed đã lưu. Nếu nhóm không gửi hoặc không có target, tie-break bằng seed. Rule 2 bật sau lần loại đầu, giữ nguyên sau đó. Còn một active thì tự FINISHED.
 - Điểm đội = tổng `totalPoints` của mọi participant trong đội, kể cả đã bị loại. Đội đồng điểm cùng hạng. Nếu FINISH sớm với nhiều active, bảng điểm cá nhân xếp theo điểm; nếu chỉ còn một active, người đó là survivor champion và bảng điểm vẫn hiển thị riêng.
@@ -180,7 +193,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 | `GET /api/room/state?code=ABCD&view=public|player|host` | Public, Player hoặc Host | `view=public` không cần credential; `player` cần Player token; `host` cần Host cookie. Server kiểm tra quyền trước khi trả projection/`304`; mã sai → `404`. |
 | `POST /api/room/login` | public | `{code,name}` → `{playerToken, account, runId, version}`. Tạo account theo nickname và join run hiện tại; chỉ khi run ở LOBBY (`409 INVALID_TRANSITION` nếu đã bắt đầu). Nickname trùng → `409 NAME_TAKEN`; room đầy → `409 ROOM_FULL`. Người chơi quay lại bằng token đã lưu; mất token thì không nhận lại nickname cũ được. |
 | `POST /api/room/join` | Player token | `{runId}` → `{joined,version}`; idempotent. Chỉ thêm participant ở LOBBY; dùng khi token cũ nhận `runId` mới sau reset. |
-| `PUT /api/room/pick` | Player token | `{runId,round,value,requestId}` → `{acceptedVersion,pick}`. |
+| `PUT /api/room/pick` | Player token | `{runId,round,value,stake?,requestId}` → `{acceptedVersion,pick,stake}`. `stake` mặc định `0`. |
 | `POST /api/room/command` | Host | `{type,commandId,expectedVersion,payload?}` → `{version,status,runId}`. |
 | `GET /api/room/archives` | Host | Danh sách `{runId,runNumber,endedAt,reason,expiresAt}` còn hạn để chọn bản xuất. |
 | `GET /api/room/export?runId=...&format=csv|json` | Host | Export run hiện tại hoặc archive còn hạn. |
@@ -192,7 +205,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 - **Host:** danh sách đã/chưa gửi khi vòng mở; chỉ thấy pick của người khác sau `ROUND_LOCKED`; có thể xem archive qua endpoint Host riêng.
 - Mỗi trạng thái ứng với `ETag: "<version>-<projection-role>-<runId>"`; 304 chỉ sau khi xác thực role và kiểm tra version. Poll mỗi 1 giây, thêm jitter nhỏ và tránh request chồng. Client refetch ngay khi tab hiện lại hoặc mạng phục hồi. Nếu dữ liệu run FINISHED đã hết hạn mà room shell còn, API trả `410 RUN_EXPIRED`; Portal hiển thị thông báo thay vì trang trắng, Host vẫn có thể RESET.
 - Host cookie dùng `HttpOnly`, `Secure` ở production, `SameSite=Strict`; API ghi kiểm tra `Origin`. Login Host/Player và pick có rate limit cơ bản.
-- `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,username,displayName,teamId,pick,distance,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có token. Archive chỉ Host xem và xuất.
+- `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,roundMode,username,displayName,teamId,pick,distance,stake,payout,wagerPoints,basePoints,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có token. Archive chỉ Host xem và xuất.
 
 Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `TURSO_DATABASE_URL=file:db/keynesian-beauty-contest.dev.db`; production bắt buộc `TURSO_DATABASE_URL` là URL `libsql://`/`https://` của Turso và có `TURSO_AUTH_TOKEN`. Không đưa token vào `NEXT_PUBLIC_*`.
 

@@ -79,7 +79,7 @@ export async function joinPlayer(code: string, username: string, runId: string, 
   return result.value;
 }
 
-export async function putPick(code: string, username: string, args: { runId: string; round: number; value: number; requestId: string }, now = Date.now()): Promise<{ room: Room; result: PickResult }> {
+export async function putPick(code: string, username: string, args: { runId: string; round: number; value: number; stake?: number; requestId: string }, now = Date.now()): Promise<{ room: Room; result: PickResult }> {
   // Persist a lapsed deadline before evaluating the pick, so the first request
   // after expiry cannot slip a pick in or leave the room visually open.
   await roomForRead(code, now);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostCommandSchema, stateResponseSchema, type HostCommand } from "@/contracts";
-import { applyCommand, createRoom, project, publicArchive, registerPlayer, resolveDeadline, submitPick, type Room } from "@/lib/room";
+import { applyCommand, createRoom, csvForArchive, project, publicArchive, registerPlayer, resolveDeadline, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
 
@@ -83,7 +83,7 @@ describe("room model", () => {
     expect(game.run.participants.bea.totalPoints).toBe(10);
     const hostState = project(game, "host", NOW);
     if (hostState.view !== "host") throw new Error("Expected host projection.");
-    expect(hostState.hostPicks).toEqual(expect.arrayContaining([{ username: "bea", valueTenths: 200 }]));
+    expect(hostState.hostPicks).toEqual(expect.arrayContaining([{ username: "bea", valueTenths: 200, stakePoints: 0 }]));
 
     // A distinct id must not re-score an already revealed round.
     expect(() => applyCommand(game, { type: "REVEAL_ROUND", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW, "different")).toThrow("INVALID_TRANSITION");
@@ -320,6 +320,143 @@ describe("room model", () => {
       const update = (timerSeconds: number | null) => ({ type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { timerSeconds } });
       for (const ok of [60, 90, 120, null]) expect(hostCommandSchema.safeParse(update(ok)).success).toBe(true);
       expect(hostCommandSchema.safeParse(update(45)).success).toBe(false);
+    });
+  });
+  describe("wager rounds", () => {
+    function wagerRound(input: Room, submissions: Record<string, { value: number; stake: number }>, payload: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"] = {}): Room {
+      let game = applyCommand(input, {
+        type: "UPDATE_SETTINGS",
+        commandId: crypto.randomUUID(),
+        expectedVersion: input.version,
+        payload: { roundMode: "WAGER", ...payload },
+      }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      for (const [username, submission] of Object.entries(submissions)) {
+        game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, ...submission, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      return command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    }
+
+    it("splits the whole pot between winners by stake, then applies basic scoring", () => {
+      const game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 10 },
+        bea: { value: 10, stake: 20 },
+        cy: { value: 70, stake: 30 },
+      }, { startPoints: 100, winPoints: 10, losePoints: 5 });
+      const result = game.run.rounds[0].result!;
+
+      expect(result.winners).toEqual(["ada", "bea"]);
+      expect(result.wagerPot).toBe(60);
+      expect(result.payoutsByUsername).toEqual({ ada: 20, bea: 40 });
+      expect(result.wagerPointsByUsername).toEqual({ ada: 10, bea: 20, cy: -30 });
+      expect(result.basePointsByUsername).toEqual({ ada: 10, bea: 10, cy: -5 });
+      expect(result.pointsByUsername).toEqual({ ada: 20, bea: 30, cy: -35 });
+      expect(Object.fromEntries(Object.entries(game.run.participants).map(([username, player]) => [username, player.totalPoints]))).toEqual({ ada: 120, bea: 130, cy: 65 });
+    });
+
+    it("assigns indivisible remainder points deterministically by username", () => {
+      const game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 1 },
+        bea: { value: 10, stake: 1 },
+        cy: { value: 70, stake: 1 },
+      }, { winPoints: 0, losePoints: 0 });
+      expect(game.run.rounds[0].result?.payoutsByUsername).toEqual({ ada: 2, bea: 1 });
+    });
+
+    it("refunds every stake when no winner has staked points", () => {
+      const game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 0 },
+        bea: { value: 10, stake: 0 },
+        cy: { value: 70, stake: 30 },
+      }, { winPoints: 0, losePoints: 0 });
+      const result = game.run.rounds[0].result!;
+      expect(result).toMatchObject({ wagerPot: 30, wagerRefunded: true, payoutsByUsername: { cy: 30 }, wagerPointsByUsername: {}, pointsByUsername: {} });
+      expect(game.run.participants.cy.totalPoints).toBe(100);
+    });
+
+    it("keeps stakes private while open and reveals them after lock/reveal", () => {
+      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER" } }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 25, requestId: crypto.randomUUID(), now: NOW }).room;
+
+      const publicOpen = project(game, "public", NOW);
+      const playerOpen = project(game, "player", NOW, "ada");
+      const hostOpen = project(game, "host", NOW);
+      expect(JSON.stringify(publicOpen)).not.toContain('"stakePoints":25');
+      expect(playerOpen.view === "player" && playerOpen.self.currentStakePoints).toBe(25);
+      expect(hostOpen.view === "host" && hostOpen.hostPicks).toBeNull();
+      expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].stakes).toEqual({});
+
+      game = command(game, "LOCK_ROUND").room;
+      const hostLocked = project(game, "host", NOW);
+      expect(hostLocked.view === "host" && hostLocked.hostPicks).toEqual(expect.arrayContaining([{ username: "ada", valueTenths: 100, stakePoints: 25 }]));
+      game = command(game, "REVEAL_ROUND").room;
+      expect(project(game, "public", NOW).revealedRounds[0].stakesByUsername).toMatchObject({ ada: 25, bea: 0, cy: 0 });
+    });
+
+    it("rejects invalid stakes and defaults non-submitters to a zero stake", () => {
+      let standard = joinAll(room());
+      standard = command(standard, "OPEN_ROUND").room;
+      expect(() => submitPick(standard, { username: "ada", runId: standard.run.id, round: 1, value: 10, stake: 1, requestId: crypto.randomUUID(), now: NOW })).toThrow("A stake is only allowed");
+
+      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER", startPoints: 20 } }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      expect(() => submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 21, requestId: crypto.randomUUID(), now: NOW })).toThrow("Stake cannot exceed");
+      game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 20, requestId: crypto.randomUUID(), now: NOW }).room;
+      game = command(game, "LOCK_ROUND").room;
+      expect(game.run.rounds[0].picks).toMatchObject({ bea: 500, cy: 500 });
+      expect(game.run.rounds[0].stakes).toEqual({ ada: 20, bea: 0, cy: 0 });
+    });
+
+    it("restores every wager and basic point change when the host cancels a result", () => {
+      let game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 10 },
+        bea: { value: 10, stake: 20 },
+        cy: { value: 70, stake: 30 },
+      }, { startPoints: 100, winPoints: 10, losePoints: 5 });
+      game = command(game, "CANCEL_ROUND_RESULT").room;
+      expect(Object.values(game.run.participants).map((player) => player.totalPoints)).toEqual([100, 100, 100]);
+      expect(game.run.rounds[0].result).toBeNull();
+      expect(game.run.rounds[0].stakes).toEqual({ ada: 10, bea: 20, cy: 30 });
+    });
+
+    it("snapshots mode per round so the host can switch back to standard", () => {
+      let game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 10 }, bea: { value: 20, stake: 10 }, cy: { value: 30, stake: 10 },
+      });
+      game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { roundMode: "STANDARD" } }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      expect(game.run.rounds[0].settings.roundMode).toBe("WAGER");
+      expect(game.run.rounds[1].settings.roundMode).toBe("STANDARD");
+    });
+
+    it("keeps projections compatible with snapshots created before wager fields existed", () => {
+      let game = joinAll(room());
+      game = command(game, "OPEN_ROUND").room;
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      const legacy = game as unknown as {
+        run: { settingsForNextRound: { roundMode?: string }; rounds: Array<{ settings: { roundMode?: string }; stakes?: Record<string, number>; result: Record<string, unknown> | null }> };
+      };
+      delete legacy.run.settingsForNextRound.roundMode;
+      delete legacy.run.rounds[0].settings.roundMode;
+      delete legacy.run.rounds[0].stakes;
+      const legacyResult = legacy.run.rounds[0].result!;
+      for (const key of ["basePointsByUsername", "wagerPointsByUsername", "payoutsByUsername", "wagerPot", "wagerRefunded"]) delete legacyResult[key];
+
+      const state = project(game, "player", NOW, "ada");
+      expect(stateResponseSchema.safeParse(state).success).toBe(true);
+      expect(state.currentRound?.settings.roundMode).toBe("STANDARD");
+      expect(state.nextRoundSettings.roundMode).toBe("STANDARD");
+      expect(state.view === "player" && state.self.currentStakePoints).toBe(0);
+    });
+
+    it("includes wager settlement columns in CSV exports", () => {
+      const game = wagerRound(joinAll(room()), {
+        ada: { value: 10, stake: 10 }, bea: { value: 10, stake: 20 }, cy: { value: 70, stake: 30 },
+      });
+      const csv = csvForArchive(publicArchive(game));
+      expect(csv.split("\r\n")[0]).toBe("runId,round,roundMode,username,displayName,teamId,pick,distance,stake,payout,wagerPoints,basePoints,points,winner,eliminated");
+      expect(csv).toContain(",WAGER,ada,Ada,red,10,");
     });
   });
   it("rejects picks that are not whole numbers between 0 and 100", () => {

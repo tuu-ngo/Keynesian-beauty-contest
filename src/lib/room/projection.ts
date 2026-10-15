@@ -2,6 +2,10 @@ import type { StateResponse } from "@/contracts";
 import type { Room } from "./model";
 import { individualLeaderboard, teamLeaderboard } from "./model";
 
+function publicSettings<T extends { roundMode?: "STANDARD" | "WAGER" }>(settings: T) {
+  return { ...settings, roundMode: settings.roundMode ?? "STANDARD" };
+}
+
 function currentRound(room: Room) {
   return room.run.rounds.at(-1) ?? null;
 }
@@ -51,17 +55,17 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
     })),
     currentRound: round ? {
       number: round.number,
-      settings: round.settings,
+      settings: publicSettings(round.settings),
       deadlineAt: isOpen ? round.deadlineAt : null,
       timerPaused: isOpen && round.timerPaused === true,
       pausedRemainingMs: isOpen && round.timerPaused === true ? round.pausedRemainingMs : null,
     } : null,
-    nextRoundSettings: room.run.settingsForNextRound,
+    nextRoundSettings: publicSettings(room.run.settingsForNextRound),
     submittedCount: hasCurrentSubmissions ? active.filter((participant) => round.picks[participant.username] !== undefined).length : 0,
     activeCount: active.length,
     revealedRounds: room.run.rounds.filter((candidate) => candidate.result !== null).map((candidate) => ({
       number: candidate.number,
-      settings: candidate.settings,
+      settings: publicSettings(candidate.settings),
       average: candidate.result!.average,
       target: candidate.result!.target,
       picks: Object.values(candidate.picks).map((valueTenths) => ({ valueTenths })),
@@ -69,6 +73,12 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       eliminatedUsername: candidate.result!.eliminatedUsername,
       pointEliminatedUsernames: candidate.result!.pointEliminatedUsernames ?? [],
       pointsByUsername: candidate.result!.pointsByUsername,
+      basePointsByUsername: candidate.result!.basePointsByUsername ?? candidate.result!.pointsByUsername,
+      wagerPointsByUsername: candidate.result!.wagerPointsByUsername ?? {},
+      stakesByUsername: candidate.settings.roundMode === "WAGER" ? (candidate.stakes ?? {}) : {},
+      payoutsByUsername: candidate.result!.payoutsByUsername ?? {},
+      wagerPot: candidate.result!.wagerPot ?? 0,
+      wagerRefunded: candidate.result!.wagerRefunded ?? false,
     })),
     individualLeaderboard: individualLeaderboard(room.run),
     teamLeaderboard: teamLeaderboard(room),
@@ -80,7 +90,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       view,
       canCancelRoundResult,
       hostPicks: room.run.status === "ROUND_LOCKED" || room.run.status === "ROUND_REVEALED" || room.run.status === "FINISHED"
-        ? Object.entries(round?.picks ?? {}).map(([pickUsername, valueTenths]) => ({ username: pickUsername, valueTenths }))
+        ? Object.entries(round?.picks ?? {}).map(([pickUsername, valueTenths]) => ({ username: pickUsername, valueTenths, stakePoints: round?.stakes?.[pickUsername] ?? 0 }))
         : null,
     };
   }
@@ -98,6 +108,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
     self: {
       username,
       currentPickTenths: round?.picks[username] ?? null,
+      currentStakePoints: round?.stakes?.[username] ?? 0,
       totalPoints: participant?.totalPoints ?? 0,
       status: participant?.status ?? "ACTIVE",
       eliminatedInRound: participant?.eliminatedInRound ?? null,

@@ -63,8 +63,8 @@ export function PlayerClient({ code }: { code: string }) {
 
   return <main className="player-page">
     <header className="player-header">
-      <div><span className="eyeline">Game {game.code}</span><strong>{player?.displayName ?? game.self.username}</strong></div>
-      <ConnectionStatus state={connection} />
+      <div className="player-header__identity"><span className="eyeline">Game {game.code}</span><strong>{player?.displayName ?? game.self.username}</strong></div>
+      <div className="player-header__status"><span className="player-points" aria-label={`${game.self.totalPoints} points available`}><small>Points</small><b>{game.self.totalPoints}</b></span><ConnectionStatus state={connection} /></div>
     </header>
     <div className="player-main">
       {team && <p className="team-line"><TeamMark name={team.name} color={team.color} />{team.name}</p>}
@@ -81,7 +81,7 @@ function PlayerStage({ game, token, onAnnouncement, refresh }: { game: PlayerPro
   if (game.self.status === "ELIMINATED" && game.status !== "FINISHED") return <EliminatedScreen game={game} />;
   if (game.status === "ROUND_OPEN" && game.self.status === "ACTIVE" && game.currentRound) return <PickForm game={game} token={token} refresh={refresh} onAnnouncement={onAnnouncement} />;
   if (game.status === "ROUND_OPEN" && game.currentRound) return <section className="player-stage"><p className="eyeline">Round {game.currentRound.number}</p><h1>You&apos;re spectating</h1><p>You were eliminated, but you can follow every result here.</p><p className="countdown"><Countdown deadlineAt={game.currentRound.deadlineAt} serverNow={game.serverNow} paused={game.currentRound.timerPaused} pausedRemainingMs={game.currentRound.pausedRemainingMs} /></p><p>{game.currentRound.timerPaused ? "Timer stopped by the Host. " : ""}{game.submittedCount} of {game.activeCount} active players have submitted.</p></section>;
-  if (game.status === "ROUND_LOCKED") return <section className="player-stage"><p className="eyeline">Round {game.currentRound?.number ?? ""}</p><h1>Picks are locked.</h1><p>{game.self.currentPickTenths === null ? "You did not save a pick this round." : `Your last saved pick was ${tenths(game.self.currentPickTenths)}.`} The host will reveal the result shortly.</p></section>;
+  if (game.status === "ROUND_LOCKED") return <section className="player-stage"><p className="eyeline">Round {game.currentRound?.number ?? ""}</p><h1>Picks are locked.</h1><p>{game.self.currentPickTenths === null ? "You did not save a pick this round." : `Your last saved pick was ${tenths(game.self.currentPickTenths)}${game.currentRound?.settings.roundMode === "WAGER" ? ` with a ${game.self.currentStakePoints}-point stake` : ""}.`} The host will reveal the result shortly.</p></section>;
   if (result) return <PlayerResult game={game} />;
   return <section className="player-stage"><h1>Waiting for the result</h1><p>The latest confirmed game state is shown here.</p></section>;
 }
@@ -104,33 +104,40 @@ function EliminatedScreen({ game }: { game: PlayerProjection }) {
 function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjection; token: string; refresh: () => Promise<void>; onAnnouncement: (value: string) => void }) {
   const round = game.currentRound!;
   const saved = game.self.currentPickTenths;
+  const wagerRound = round.settings.roundMode === "WAGER";
+  const savedStake = game.self.currentStakePoints;
   const [value, setValue] = useState(saved === null ? "50" : String(saved / 10));
+  const [stake, setStake] = useState(String(savedStake));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [savedOk, setSavedOk] = useState(false);
   const [now, setNow] = useState(Date.parse(game.serverNow));
   // `touched` keeps a late server refresh from snapping the slider back while the player is still dragging.
   const touched = useRef(false);
-  const lastSent = useRef<number | null>(saved === null ? null : saved / 10);
+  const lastSent = useRef<{ pick: number; stake: number } | null>(saved === null ? null : { pick: saved / 10, stake: savedStake });
   const queue = useRef<Promise<void>>(Promise.resolve());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { touched.current = false; setValue(saved === null ? "50" : String(saved / 10)); lastSent.current = saved === null ? null : saved / 10; }, [round.number]);
+  useEffect(() => { touched.current = false; setValue(saved === null ? "50" : String(saved / 10)); setStake(String(savedStake)); lastSent.current = saved === null ? null : { pick: saved / 10, stake: savedStake }; }, [round.number]);
   useEffect(() => {
-    lastSent.current = saved === null ? null : saved / 10;
-    if (!touched.current) setValue(saved === null ? "50" : String(saved / 10));
-  }, [saved]);
+    lastSent.current = saved === null ? null : { pick: saved / 10, stake: savedStake };
+    if (!touched.current) { setValue(saved === null ? "50" : String(saved / 10)); setStake(String(savedStake)); }
+  }, [saved, savedStake]);
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []);
   const timeUp = Boolean(round.deadlineAt && !round.timerPaused && now >= Date.parse(round.deadlineAt));
   const numeric = Number(value);
-  const valid = Number.isInteger(numeric) && numeric >= round.settings.min && numeric <= round.settings.max;
+  const numericStake = wagerRound ? Number(stake) : 0;
+  const validPick = Number.isInteger(numeric) && numeric >= round.settings.min && numeric <= round.settings.max;
+  const validStake = Number.isInteger(numericStake) && numericStake >= 0 && numericStake <= game.self.totalPoints;
+  const valid = validPick && validStake;
   function change(next: string) { touched.current = true; setValue(next); }
+  function changeStake(next: string) { touched.current = true; setStake(next); }
 
   /** Sends the pick; requests are chained so the last value the player chose is always the last one the server sees. */
-  function send(target: number): Promise<boolean> {
+  function send(target: number, targetStake: number): Promise<boolean> {
     const run = queue.current.then(async () => {
       try {
-        await roomRequest("/api/room/pick", { method: "PUT", headers: authHeaders(token), body: { runId: game.runId, round: round.number, value: target, requestId: crypto.randomUUID() } });
-        lastSent.current = target;
+        await roomRequest("/api/room/pick", { method: "PUT", headers: authHeaders(token), body: { runId: game.runId, round: round.number, value: target, stake: targetStake, requestId: crypto.randomUUID() } });
+        lastSent.current = { pick: target, stake: targetStake };
         return true;
       } catch (error) {
         setMessage(error instanceof RoomClientError ? error.problem.message : "Could not save your pick. Try again.");
@@ -144,43 +151,50 @@ function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjec
 
   // Auto-save: whatever the player last chose is stored shortly after they stop moving it, and right away near the deadline.
   useEffect(() => {
-    if (!touched.current || !valid || timeUp || lastSent.current === numeric) return;
+    if (!touched.current || !valid || timeUp || (lastSent.current?.pick === numeric && lastSent.current.stake === numericStake)) return;
     const msLeft = round.deadlineAt ? Date.parse(round.deadlineAt) - Date.now() : Infinity;
     const delay = Math.max(0, Math.min(600, msLeft - 1500));
     const id = window.setTimeout(() => {
-      void send(numeric).then((ok) => { if (ok) { setMessage("Your pick is saved automatically. You can change it until the round is locked."); setSavedOk(true); void refresh(); } });
+      void send(numeric, numericStake).then((ok) => { if (ok) { setMessage(`${wagerRound ? "Your pick and stake are" : "Your pick is"} saved automatically. You can change ${wagerRound ? "them" : "it"} until the round is locked.`); setSavedOk(true); void refresh(); } });
     }, delay);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [numeric, valid, timeUp, value]);
+  }, [numeric, numericStake, valid, timeUp, value, stake]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!valid) { setSavedOk(false); setMessage(`Enter a whole number from ${round.settings.min} to ${round.settings.max}.`); return; }
+    if (!validPick) { setSavedOk(false); setMessage(`Enter a whole number from ${round.settings.min} to ${round.settings.max}.`); return; }
+    if (!validStake) { setSavedOk(false); setMessage(`Stake a whole number from 0 to ${game.self.totalPoints}.`); return; }
     setBusy(true); setMessage(""); setSavedOk(false); onAnnouncement("Saving pick");
     touched.current = true;
-    const ok = await send(numeric);
-    if (ok) { setMessage("Your pick is saved. You can update it until the round is locked."); setSavedOk(true); onAnnouncement("Pick saved"); await refresh(); } else void refresh();
+    const ok = await send(numeric, numericStake);
+    if (ok) { setMessage(`${wagerRound ? "Your pick and stake are" : "Your pick is"} saved. You can update ${wagerRound ? "them" : "it"} until the round is locked.`); setSavedOk(true); onAnnouncement(wagerRound ? "Pick and stake saved" : "Pick saved"); await refresh(); } else void refresh();
     setBusy(false);
   }
   return <form className="pick-form" onSubmit={submit}>
-    <div><p className="eyeline">Round {round.number}</p><h1>Make your pick</h1><p>{ruleSentence(round.settings.p)}</p></div>
+    <div><p className="eyeline">Round {round.number}{wagerRound ? " · Wager" : ""}</p><h1>{wagerRound ? "Pick and stake" : "Make your pick"}</h1><p>{ruleSentence(round.settings.p)}{wagerRound ? " Staked winners split the whole pot in proportion to their stakes." : ""}</p></div>
     <div className="round-detail"><span>{game.submittedCount} of {game.activeCount} submitted{round.timerPaused ? " · Timer stopped" : ""}</span><Countdown deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /></div>
     <label className="pick-number"><span>Your number</span><div><button type="button" aria-label="Decrease pick" onClick={() => change(String(Math.max(round.settings.min, (Number.isFinite(numeric) ? Math.round(numeric) : 50) - 1)))} disabled={busy || timeUp}>−</button><input type="number" inputMode="numeric" min={round.settings.min} max={round.settings.max} step={1} value={value} onChange={(event) => change(event.target.value)} aria-describedby="pick-help pick-message" /><button type="button" aria-label="Increase pick" onClick={() => change(String(Math.min(round.settings.max, (Number.isFinite(numeric) ? Math.round(numeric) : 50) + 1)))} disabled={busy || timeUp}>+</button></div><small id="pick-help">Choose from {round.settings.min} to {round.settings.max}, as a whole number.</small></label>
     <input className="pick-range" type="range" min={round.settings.min} max={round.settings.max} step={1} value={Number.isFinite(numeric) ? numeric : 50} onChange={(event) => change(event.target.value)} aria-label="Adjust pick" disabled={busy || timeUp} />
+    {wagerRound && <label className="stake-number"><span className="stake-number__heading"><span>Your stake</span><strong>Available: {game.self.totalPoints} pts</strong></span><input type="number" inputMode="numeric" min={0} max={game.self.totalPoints} step={1} value={stake} onChange={(event) => changeStake(event.target.value)} aria-describedby="stake-help pick-message" disabled={busy || timeUp} /><small id="stake-help">Enter a whole number from 0 to {game.self.totalPoints}. A zero stake can win base points but receives no share of the pot.</small></label>}
     {timeUp && <p className="form-message" id="pick-message">Time is up. Waiting for the game to lock.</p>}
     {!timeUp && message && <p className={`form-message ${savedOk ? "form-message--ok" : ""}`} id="pick-message">{message}</p>}
-    <button className="button button--primary" disabled={busy || timeUp}>{busy ? "Saving pick…" : saved === null ? "Save pick" : "Update pick"}</button>
+    <button className="button button--primary" disabled={busy || timeUp}>{busy ? "Saving…" : saved === null ? wagerRound ? "Save pick & stake" : "Save pick" : wagerRound ? "Update pick & stake" : "Update pick"}</button>
   </form>;
 }
 
 function PlayerResult({ game }: { game: PlayerProjection }) {
   const result = latestResult(game)!;
   const roundDelta = result.pointsByUsername[game.self.username] ?? 0;
+  const wagerDelta = result.wagerPointsByUsername[game.self.username] ?? 0;
+  const baseDelta = result.basePointsByUsername[game.self.username] ?? 0;
+  const stake = result.stakesByUsername[game.self.username] ?? 0;
+  const payout = result.payoutsByUsername[game.self.username] ?? 0;
   const self = game.players.find((player) => player.username === game.self.username);
   return <section className="player-result"><p className="eyeline">Round {result.number} result</p><h1>{game.status === "FINISHED" ? "The game is finished" : "Here’s what the room chose"}</h1>
     <div className="metric-pair"><Metric label="Average" value={decimal(result.average)} /><Metric label="Target" value={decimal(result.target)} /></div>
-    <div className="personal-result"><p>Your pick <strong>{tenths(game.self.currentPickTenths)}</strong></p><p>Points this round <strong>{roundDelta > 0 ? `+${roundDelta}` : roundDelta}</strong></p><p>Total points <strong>{game.self.totalPoints}</strong></p></div>
+    <div className="personal-result"><p>Your pick <strong>{tenths(game.self.currentPickTenths)}</strong></p>{result.settings.roundMode === "WAGER" && <><p>Your stake <strong>{stake}</strong></p><p>Pot payout <strong>{payout}</strong></p><p>Wager change <strong>{wagerDelta > 0 ? `+${wagerDelta}` : wagerDelta}</strong></p><p>Basic score <strong>{baseDelta > 0 ? `+${baseDelta}` : baseDelta}</strong></p></>}<p>Points this round <strong>{roundDelta > 0 ? `+${roundDelta}` : roundDelta}</strong></p><p>Total points <strong>{game.self.totalPoints}</strong></p></div>
+    {result.settings.roundMode === "WAGER" && <p>{result.wagerRefunded ? "No staked winner this round, so all stakes were refunded." : `The ${result.wagerPot}-point pot was split among staked winners.`}</p>}
     <p>{result.winners.length ? `Winner${result.winners.length === 1 ? "" : "s"}: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p>
     {result.pointEliminatedUsernames.includes(game.self.username) && <p className="notice notice--danger">You ran out of points and are out of the game. You can keep following as a spectator.</p>}
     {result.eliminatedUsername && <p className="notice notice--danger">{result.eliminatedUsername} was eliminated. {game.self.status === "ELIMINATED" ? "You can keep following as a spectator." : ""}</p>}

@@ -7,6 +7,7 @@ export const phaseSchema = z.enum(["NORMAL", "ESCALATION"]);
 export const statusSchema = z.enum(["LOBBY", "ROUND_OPEN", "ROUND_LOCKED", "ROUND_REVEALED", "FINISHED"]);
 export const participantStatusSchema = z.enum(["ACTIVE", "ELIMINATED"]);
 export const pSchema = z.enum(["0.8", "2/3", "1/2"]);
+export const roundModeSchema = z.enum(["STANDARD", "WAGER"]);
 export const ruleIdSchema = z.union([z.literal(1), z.literal(2)]);
 export const roomCodeSchema = z.string().regex(/^[A-Z]{4}$/, "Code must contain four uppercase letters.");
 export const uuidSchema = z.string().uuid();
@@ -32,6 +33,8 @@ export const participantSchema = accountSchema.extend({
 }).strict();
 
 export const roundSettingsSchema = z.object({
+  /** STANDARD keeps the original scoring; WAGER also settles the virtual-points pot. */
+  roundMode: roundModeSchema.default("STANDARD"),
   p: pSchema,
   min: z.literal(0),
   max: z.literal(100),
@@ -58,6 +61,13 @@ export const roundResultSchema = z.object({
   pointEliminatedUsernames: z.array(z.string()).default([]),
   /** Signed points actually applied this round (after the zero floor). */
   pointsByUsername: z.record(z.number().int()),
+  /** The basic win/loss component actually applied after wager settlement. */
+  basePointsByUsername: z.record(z.number().int()).default({}),
+  /** Signed payout-minus-stake component. Empty for a standard round. */
+  wagerPointsByUsername: z.record(z.number().int()).default({}),
+  payoutsByUsername: z.record(z.number().int().nonnegative()).default({}),
+  wagerPot: z.number().int().nonnegative().default(0),
+  wagerRefunded: z.boolean().default(false),
 }).strict();
 
 export const roundSchema = z.object({
@@ -93,6 +103,12 @@ export const revealedRoundSchema = z.object({
   winners: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), points: z.number().int().nonnegative() }).strict()),
   eliminatedUsername: z.string().nullable(),
   pointsByUsername: z.record(z.number().int()).default({}),
+  basePointsByUsername: z.record(z.number().int()).default({}),
+  wagerPointsByUsername: z.record(z.number().int()).default({}),
+  stakesByUsername: z.record(z.number().int().nonnegative()).default({}),
+  payoutsByUsername: z.record(z.number().int().nonnegative()).default({}),
+  wagerPot: z.number().int().nonnegative().default(0),
+  wagerRefunded: z.boolean().default(false),
   pointEliminatedUsernames: z.array(z.string()).default([]),
 }).strict();
 
@@ -142,6 +158,7 @@ export const playerProjectionSchema = publicProjectionSchema.extend({
   self: z.object({
     username: z.string(),
     currentPickTenths: z.number().int().min(0).max(1000).nullable(),
+    currentStakePoints: z.number().int().nonnegative(),
     totalPoints: z.number().int().nonnegative(),
     status: participantStatusSchema,
     eliminatedInRound: z.number().int().positive().nullable(),
@@ -151,7 +168,7 @@ export const playerProjectionSchema = publicProjectionSchema.extend({
 export const hostProjectionSchema = publicProjectionSchema.extend({
   view: z.literal("host"),
   canCancelRoundResult: z.boolean(),
-  hostPicks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000) }).strict()).nullable(),
+  hostPicks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), stakePoints: z.number().int().nonnegative() }).strict()).nullable(),
 }).strict();
 
 export const stateResponseSchema = z.discriminatedUnion("view", [publicProjectionSchema, playerProjectionSchema, hostProjectionSchema]);
@@ -171,6 +188,7 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("UPDATE_SETTINGS"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative(),
     payload: z.object({
       p: pSchema.optional(),
+      roundMode: roundModeSchema.optional(),
       timerSeconds: timerOptionSchema.optional(),
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),
@@ -190,6 +208,8 @@ export const pickSchema = z.object({
   runId: uuidSchema,
   round: z.number().int().positive(),
   value: z.number().finite().min(0).max(100),
+  /** Atomic with value so a saved number and its virtual-points stake cannot diverge. */
+  stake: z.number().int().nonnegative().default(0),
   requestId: uuidSchema,
 }).strict();
 

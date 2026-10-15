@@ -34,3 +34,11 @@ Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](c
 
 - Dự án dùng `npm` và `package-lock.json` vì máy dev chưa có pnpm. Scripts hiện có: `dev`, `build`, `lint`, `test`, `typecheck`.
 - Tailwind CSS 4 dùng `@tailwindcss/postcss` và `@import "tailwindcss"` trong `src/app/globals.css`; không có `tailwind.config`.
+
+## Round cá cược
+
+- Host chọn loại cho vòng kế tiếp: `STANDARD` hoặc `WAGER`. Lựa chọn được snapshot khi mở vòng, độc lập với phase `NORMAL | ESCALATION`, và có thể đổi lại sau mỗi vòng đã công bố.
+- Cá cược chỉ dùng điểm ảo trong game. Player lưu `pick` và `stake` nguyên, không âm trong cùng một request; stake không vượt quá tổng điểm hiện có. Người không gửi được pick mặc định `50` và stake mặc định `0` khi khóa vòng.
+- Khi công bố vòng cá cược, server trừ stake, chia toàn bộ pot cho những winner có stake theo tỷ lệ stake, rồi áp dụng điểm thắng/thua cơ bản. Điểm chia lẻ dùng largest-remainder; phần dư bằng nhau ưu tiên username theo thứ tự tăng dần để kết quả xác định.
+- Winner có stake `0` vẫn nhận điểm thắng cơ bản nhưng không nhận pot. Nếu không winner nào có stake, tất cả stake được hoàn. Sau đó mới xét loại vì điểm về `0`.
+- Stake của người khác được giữ kín khi vòng mở. Sau reveal, stake, payout, wager delta, base delta và tổng delta được công bố/xuất. Hủy kết quả hoàn tác đúng tổng delta và cho phép reveal lại cùng pick/stake.

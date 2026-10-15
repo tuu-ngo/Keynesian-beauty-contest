@@ -23,7 +23,10 @@ function actionsFor(game: HostProjection): PrimaryCommand[] {
     case "LOBBY": return ["OPEN_ROUND"];
     case "ROUND_OPEN": return ["LOCK_ROUND"];
     case "ROUND_LOCKED": return ["REVEAL_ROUND"];
-    case "ROUND_REVEALED": return game.phase === "ESCALATION" ? ["OPEN_ROUND", "CANCEL_ROUND_RESULT", "FINISH"] : ["OPEN_ROUND", "CANCEL_ROUND_RESULT", "START_ESCALATION", "FINISH"];
+    case "ROUND_REVEALED": {
+      const cancel = game.canCancelRoundResult ? ["CANCEL_ROUND_RESULT" as const] : [];
+      return game.phase === "ESCALATION" ? ["OPEN_ROUND", ...cancel, "FINISH"] : ["OPEN_ROUND", ...cancel, "START_ESCALATION", "FINISH"];
+    }
     case "FINISHED": return game.canCancelRoundResult ? ["CANCEL_ROUND_RESULT", "RESET"] : ["RESET"];
   }
 }
@@ -77,7 +80,7 @@ export function HostClient({ code }: { code: string }) {
         {(game.status === "LOBBY" || game.status === "ROUND_REVEALED") && <NextRoundSettings game={game} busy={submitting === "UPDATE_SETTINGS"} onSave={(payload) => send("UPDATE_SETTINGS", payload)} />}
         {notice && <p className={`form-message ${noticeOk ? "form-message--ok" : ""}`} role="status">{notice}</p>}
       </aside>
-      <section className="host-live"><header><div><p className="eyeline">Live room</p><h2>{game.status === "ROUND_OPEN" ? `Round ${game.currentRound?.number}` : game.status.replaceAll("_", " ")}</h2></div><p>{game.submittedCount} of {game.activeCount} active players submitted</p></header>
+      <section className="host-live"><header><div><p className="eyeline">Live room</p><h2>{game.status === "ROUND_OPEN" ? `Round ${game.currentRound?.number}` : game.status.replaceAll("_", " ")}</h2></div><p>{game.currentRound?.settings.roundMode === "WAGER" ? "Wager round · " : ""}{game.submittedCount} of {game.activeCount} active players submitted</p></header>
         <LiveLeaderboard game={game} />
         <RosterByTeam game={game} />
         <HostRoundDetail game={game} />
@@ -99,6 +102,7 @@ function HostTimerControls({ game, busy, submitting, onCommand }: { game: HostPr
 
 function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy: boolean; onSave: (payload: SettingsPayload) => Promise<void> }) {
   const saved = game.nextRoundSettings;
+  const [roundMode, setRoundMode] = useState(saved.roundMode ?? "STANDARD");
   const [p, setP] = useState(saved.p);
   const timerText = (seconds: number | null) => seconds === null ? "off" : String(seconds);
   const [timer, setTimer] = useState<string>(timerText(saved.timerSeconds));
@@ -106,19 +110,19 @@ function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy:
   const [losePoints, setLosePoints] = useState(String(saved.losePoints ?? 0));
   const [startPoints, setStartPoints] = useState(String(saved.startPoints ?? 0));
   useEffect(() => {
-    setP(saved.p); setTimer(timerText(saved.timerSeconds));
+    setRoundMode(saved.roundMode ?? "STANDARD"); setP(saved.p); setTimer(timerText(saved.timerSeconds));
     setWinPoints(String(saved.winPoints ?? 10)); setLosePoints(String(saved.losePoints ?? 0)); setStartPoints(String(saved.startPoints ?? 0));
-  }, [saved.p, saved.timerSeconds, saved.winPoints, saved.losePoints, saved.startPoints]);
+  }, [saved.roundMode, saved.p, saved.timerSeconds, saved.winPoints, saved.losePoints, saved.startPoints]);
   function submit(event: FormEvent) {
     event.preventDefault();
     const seconds = timer === "off" ? null : (Number(timer) as 60 | 90 | 120);
-    void onSave({ p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), startPoints: Number(startPoints) });
+    void onSave({ roundMode, p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), startPoints: Number(startPoints) });
   }
-  return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="90">90 seconds</option><option value="120">120 seconds</option><option value="off">Off</option></select></label>
+  return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Round type</span><select value={roundMode} onChange={(event) => setRoundMode(event.target.value as typeof roundMode)}><option value="STANDARD">Standard round</option><option value="WAGER">Wager round</option></select></label><label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label><label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="90">90 seconds</option><option value="120">120 seconds</option><option value="off">Off</option></select></label>
     <label><span>Starting points (0 = no elimination by points)</span><input type="number" inputMode="numeric" min={0} max={100000} step={1} required value={startPoints} onChange={(event) => setStartPoints(event.target.value)} disabled={game.status !== "LOBBY"} /></label>
     <label><span>Points per win</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={winPoints} onChange={(event) => setWinPoints(event.target.value)} /></label>
     <label><span>Points lost per loss</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={losePoints} onChange={(event) => setLosePoints(event.target.value)} /></label>
-    <p>Changes apply to the next round. The open round keeps its saved settings. A loss only counts in rounds that have a winner; a player who reaches 0 points is eliminated (starting points apply in the lobby only).</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
+    <p>Changes apply to the next round. In a wager round, players stake virtual points and staked winners split the whole pot in proportion to their stakes. Basic win/loss points still apply.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
 }
 
 function LiveLeaderboard({ game }: { game: HostProjection }) {
@@ -142,7 +146,7 @@ function RosterByTeam({ game }: { game: HostProjection }) {
 
 function HostRoundDetail({ game }: { game: HostProjection }) {
   const result = game.revealedRounds.at(-1);
-  return <section className="host-round-detail"><h2>Round detail</h2>{game.hostPicks ? <ul className="host-picks">{game.hostPicks.map((pick) => <li key={pick.username}><span>{game.players.find((player) => player.username === pick.username)?.displayName ?? pick.username}</span><strong>{tenths(pick.valueTenths)}</strong></li>)}</ul> : <p>{game.status === "ROUND_OPEN" ? "Names show submitted state only until the round locks." : "Round detail will appear after the first lock."}</p>}{result && <><div className="metric-pair"><Metric label="Average" value={decimal(result.average)} /><Metric label="Target" value={decimal(result.target)} /></div><p>{result.winners.length ? `Winners: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p><p>{game.activeRules.length ? `Rules in force: ${game.activeRules.map((rule) => `Rule ${rule}`).join(", ")}.` : "No escalation rules are in force."}</p><p>{game.escalationReason === "NASH" ? "Nash-triggered escalation." : game.escalationReason === "HOST" ? "Host-triggered escalation." : "Normal round."}</p><Analytics game={game} /></>}</section>;
+  return <section className="host-round-detail"><h2>Round detail</h2>{game.hostPicks ? <ul className="host-picks">{game.hostPicks.map((pick) => <li key={pick.username}><span>{game.players.find((player) => player.username === pick.username)?.displayName ?? pick.username}</span><strong>{tenths(pick.valueTenths)}{game.currentRound?.settings.roundMode === "WAGER" ? ` · ${pick.stakePoints} pts staked` : ""}</strong></li>)}</ul> : <p>{game.status === "ROUND_OPEN" ? "Names show submitted state only until the round locks." : "Round detail will appear after the first lock."}</p>}{result && <><div className="metric-pair"><Metric label="Average" value={decimal(result.average)} /><Metric label="Target" value={decimal(result.target)} /></div><p>{result.winners.length ? `Winners: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p>{result.settings.roundMode === "WAGER" && <p><strong>Wager pot: {result.wagerPot} pts.</strong> {result.wagerRefunded ? "No winner had a stake, so every stake was refunded." : `Payouts: ${Object.entries(result.payoutsByUsername).map(([username, payout]) => `${username} +${payout}`).join(", ") || "none"}.`}</p>}<p>{game.activeRules.length ? `Rules in force: ${game.activeRules.map((rule) => `Rule ${rule}`).join(", ")}.` : "No escalation rules are in force."}</p><p>{game.escalationReason === "NASH" ? "Nash-triggered escalation." : game.escalationReason === "HOST" ? "Host-triggered escalation." : "Normal round."}</p><Analytics game={game} /></>}</section>;
 }
 
 function Analytics({ game }: { game: HostProjection }) {
