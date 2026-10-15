@@ -57,6 +57,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       picks: Object.values(candidate.picks).map((valueTenths) => ({ valueTenths })),
       winners: candidate.result!.winners.map((winner) => ({ username: winner, valueTenths: candidate.picks[winner], points: candidate.result!.pointsByUsername[winner] ?? 0 })),
       eliminatedUsername: candidate.result!.eliminatedUsername,
+      pointsByUsername: candidate.result!.pointsByUsername,
     })),
     individualLeaderboard: individualLeaderboard(room.run),
     teamLeaderboard: teamLeaderboard(room),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stateResponseSchema, type HostCommand } from "@/contracts";
+import { hostCommandSchema, stateResponseSchema, type HostCommand } from "@/contracts";
 import { applyCommand, createRoom, project, publicArchive, registerPlayer, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
@@ -181,5 +181,44 @@ describe("room model", () => {
     expect(code(() => registerPlayer(game, { name: "x".repeat(21), now: NOW }))).toBe("VALIDATION_ERROR");
     const started = command(game, "OPEN_ROUND").room;
     expect(code(() => registerPlayer(started, { name: "Eve", now: NOW }))).toBe("INVALID_TRANSITION");
+  });
+
+  describe("configurable points", () => {
+    function playRound(input: Room, picks: Record<string, number>, payload?: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"]): Room {
+      let game = input;
+      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries(picks)) {
+        game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = command(game, "LOCK_ROUND").room;
+      return command(game, "REVEAL_ROUND").room;
+    }
+
+    it("awards win points, deducts loss points and never drops below zero", () => {
+      // avg 20, target 16 -> Ada (15) wins; Bea and Cy lose.
+      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 7, losePoints: 3 });
+      expect(game.run.participants.ada.totalPoints).toBe(7);
+      expect(game.run.participants.bea.totalPoints).toBe(0);
+      expect(game.run.rounds[0].result!.pointsByUsername).toEqual({ ada: 7 });
+      game = playRound(game, { ada: 25, bea: 15, cy: 20 });
+      expect(game.run.participants.bea.totalPoints).toBe(7);
+      expect(game.run.participants.ada.totalPoints).toBe(4);
+      expect(game.run.rounds[1].result!.pointsByUsername).toMatchObject({ bea: 7, ada: -3 });
+    });
+
+    it("caps a player's total at maxPoints", () => {
+      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 10, maxPoints: 15 });
+      game = playRound(game, { ada: 15, bea: 20, cy: 25 });
+      expect(game.run.participants.ada.totalPoints).toBe(15);
+      expect(game.run.rounds[1].result!.pointsByUsername.ada).toBe(5);
+    });
+
+    it("only accepts 60, 90, 120 or off as timer options", () => {
+      const game = joinAll(room());
+      const update = (timerSeconds: number | null) => ({ type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { timerSeconds } });
+      for (const ok of [60, 90, 120, null]) expect(hostCommandSchema.safeParse(update(ok)).success).toBe(true);
+      expect(hostCommandSchema.safeParse(update(45)).success).toBe(false);
+    });
   });
 });

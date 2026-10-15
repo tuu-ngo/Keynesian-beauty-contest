@@ -37,7 +37,13 @@ export const roundSettingsSchema = z.object({
   max: z.literal(100),
   step: z.literal(0.1),
   timerSeconds: z.number().int().min(5).max(60 * 60).nullable(),
+  /** Points a winner earns, points every non-winner loses (only in rounds that have a winner), and the per-player total cap (null = no cap). */
+  winPoints: z.number().int().min(0).max(1000).default(10),
+  losePoints: z.number().int().min(0).max(1000).default(0),
+  maxPoints: z.number().int().min(1).max(100000).nullable().default(null),
 }).strict();
+
+export const timerOptionSchema = z.union([z.literal(60), z.literal(90), z.literal(120)]).nullable();
 
 export const roundResultSchema = z.object({
   average: z.string().nullable(),
@@ -46,7 +52,8 @@ export const roundResultSchema = z.object({
   eliminatedUsername: z.string().nullable(),
   eliminationSeed: z.string().nullable(),
   eliminationCandidates: z.array(z.string()),
-  pointsByUsername: z.record(z.number().int().nonnegative()),
+  /** Signed points actually applied this round (after the max-points cap and the zero floor). */
+  pointsByUsername: z.record(z.number().int()),
 }).strict();
 
 export const roundSchema = z.object({
@@ -78,6 +85,7 @@ export const revealedRoundSchema = z.object({
   picks: z.array(z.object({ valueTenths: z.number().int().min(0).max(1000) }).strict()),
   winners: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), points: z.number().int().nonnegative() }).strict()),
   eliminatedUsername: z.string().nullable(),
+  pointsByUsername: z.record(z.number().int()).default({}),
 }).strict();
 
 export const leaderboardRowSchema = z.object({
@@ -142,7 +150,13 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("RESET"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({
     type: z.literal("UPDATE_SETTINGS"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative(),
-    payload: z.object({ p: pSchema.optional(), timerSeconds: z.number().int().min(5).max(60 * 60).nullable().optional() }).strict(),
+    payload: z.object({
+      p: pSchema.optional(),
+      timerSeconds: timerOptionSchema.optional(),
+      winPoints: z.number().int().min(0).max(1000).optional(),
+      losePoints: z.number().int().min(0).max(1000).optional(),
+      maxPoints: z.number().int().min(1).max(100000).nullable().optional(),
+    }).strict(),
   }).strict(),
 ]);
 
