@@ -49,12 +49,12 @@ export function PlayerClient({ code }: { code: string }) {
   }, [code, errorCode, refresh, token]);
 
   if (!tokenReady) return <ScreenSkeleton />;
-  if (token === null) return <main className="app-page empty-state"><p>Sign in to join this game.</p><Link className="button button--primary" href={`/login?code=${code}`}>Go to sign in</Link></main>;
+  if (token === null) return <main className="app-page empty-state"><p>Enter your name to join this game.</p><Link className="button button--primary" href={`/login?code=${code}`}>Join game</Link></main>;
   if (error?.problem.status === 401) {
     removePlayerToken(code);
-    return <main className="app-page empty-state"><p>Sign in to join this game.</p><Link className="button button--primary" href={`/login?code=${code}`}>Go to sign in</Link></main>;
+    return <main className="app-page empty-state"><p>Enter your name to join this game.</p><Link className="button button--primary" href={`/login?code=${code}`}>Join game</Link></main>;
   }
-  if (!data && error?.problem.status === 404) return <main className="app-page empty-state"><p>We could not find this game.</p><Link className="button button--primary" href="/login">Go to sign in</Link></main>;
+  if (!data && error?.problem.status === 404) return <main className="app-page empty-state"><p>We could not find this game.</p><Link className="button button--primary" href="/login">Join another game</Link></main>;
   if (!data && error?.problem.status === 410) return <main className="app-page empty-state"><p>This game is no longer available.</p><Link className="button button--primary" href={`/portal/${code}`}>Open Portal</Link></main>;
   if (!data) return <ScreenSkeleton />;
   const game = data;

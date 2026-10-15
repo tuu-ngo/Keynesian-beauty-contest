@@ -1,10 +1,5 @@
 import type { Team } from "@/contracts";
-import type { AccountSecret, Room } from "@/lib/room";
-
-export interface SeedRoster {
-  teams: Team[];
-  accounts: AccountSecret[];
-}
+import type { Room } from "@/lib/room";
 
 /**
  * The durable boundary for the v1 single-room backend. Mutators receive a
@@ -17,6 +12,6 @@ export interface RoomStore {
   getRoomByCode(code: string): Promise<Room | null>;
   createRoom(room: Room): Promise<void>;
   mutateRoom<T>(code: string, mutator: (room: Room) => { room: Room; value: T }): Promise<{ room: Room; value: T } | null>;
-  loadSeedRoster(): Promise<SeedRoster>;
+  loadSeedTeams(): Promise<Team[]>;
   consumeRateLimit(scope: string, limit: number, windowMs: number, now?: number): Promise<boolean>;
 }

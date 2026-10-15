@@ -150,10 +150,9 @@ Use an asymmetric but quiet two-part desktop layout:
 
 ```text
 ┌───────────────────────────┬────────────────────────────────┐
-│ Game identity and rule    │ Sign-in form                    │
+│ Game identity and rule    │ Join form                       │
 │ One-sentence explanation  │ Room code                       │
-│ Link: Host sign in        │ Username                        │
-│                           │ Password                        │
+│ Link: Host sign in        │ Nickname                        │
 │                           │ [Join game]                     │
 └───────────────────────────┴────────────────────────────────┘
 ```
@@ -165,18 +164,17 @@ On mobile, form content appears first, followed by the concise rule explanation 
 | Element | Requirement |
 | --- | --- |
 | Room code | Required. Four uppercase letters. Auto-uppercase visually but validate on submit. A portal QR pre-fills this field through `?code=ABCD`. |
-| Username | Required seeded account name. Trim whitespace. Use `autocomplete="username"`. |
-| Password | Required. Use `autocomplete="current-password"`. Never persist it. |
+| Nickname | Required, max 20 characters, shown on the Portal. Trim and collapse whitespace. No password, no account. |
 | Submit | Label: `Join game`. Disabled only while request is active. |
 | Host link | Label: `Host sign in`. Routes to `/host`. |
 
-Submit calls `POST /api/room/login`. Store only the opaque player token in local storage, scoped by room code. Then navigate to `/play/[code]`. If a valid scoped token already exists, attempt the player projection first and skip the password form only after the server confirms it.
+Submit calls `POST /api/room/login` with `{code, name}`. Store only the opaque player token in local storage, scoped by room code. Then navigate to `/play/[code]`. If a valid scoped token already exists for the entered code, check the player projection and go straight to `/play/[code]` once the server confirms it.
 
 ### States
 
 - **Initial:** Focus on Room code. Explain, in one line, `Choose a number closest to the target based on the group's average.`
-- **Invalid credentials:** Inline message: `We could not sign you in. Check the room code, username, and password.`
-- **Roster locked:** Explain that only participants who joined before round one can return to the game. Keep the portal link available.
+- **Nickname taken:** Inline message: `That nickname is already taken in this game. Try another one.`
+- **Game started:** Explain that new players can join when the host starts a new game; returning players are restored from their stored token.
 - **Network failure:** Keep field values. Offer `Try again`.
 - **Expired run:** Explain that this game is no longer available and link to the portal only when its public state is still available.
 
@@ -244,7 +242,7 @@ Host authentication uses the secure, HttpOnly Host cookie. The initial Host page
 | Signed in, no room | Seed readiness summary, room creation action | `Create room` posts to `/api/room`. |
 | Signed in, room exists | Brief loading state | Redirect to `/host/[code]`. |
 
-Room creation does not expose seeded passwords. If seed validation fails, show a plain error with the invalid data category and a link to operator documentation. Do not show raw SQL or credentials.
+If team seed validation fails during room creation, show a plain error with the invalid data category and a link to operator documentation. Do not show raw SQL or credentials.
 
 ### `/host/[code]`: console layout
 
@@ -475,7 +473,7 @@ All copy below is English and should be stored in the single English catalog.
 
 ### Role and privacy
 
-- A Player can sign in with code, username, and password, restore a valid token, and rejoin the next lobby after reset.
+- A Player can join with room code and nickname only, restore a valid token, and rejoin the next lobby after reset.
 - Portal and Player network payloads during `ROUND_OPEN` contain no other player's pick, average, target, or Host-only data.
 - Host sees named picks only after `ROUND_LOCKED`.
 - A player cannot submit after lock, deadline, elimination, or a run change.

@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "crypto";
 import type { Account, HostCommand } from "@/contracts";
-import { createPlayerToken, PLAYER_SESSION_MS, timingSafeTextEqual, tokenHash } from "@/lib/auth/player-session";
-import { applyCommand, createRoom, joinRun, purgeExpiredArchives, resolveDeadline, submitPick, RoomError, type CommandResult, type PickResult, type Room } from "@/lib/room";
+import { createPlayerToken, PLAYER_SESSION_MS, tokenHash } from "@/lib/auth/player-session";
+import { applyCommand, createRoom, joinRun, purgeExpiredArchives, registerPlayer, resolveDeadline, submitPick, type CommandResult, type PickResult, type Room } from "@/lib/room";
 import { getRoomStore } from "@/lib/store";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -35,8 +35,8 @@ export async function currentRoomForRead(now = Date.now()): Promise<Room | null>
 export async function createSingletonRoom(now = Date.now()): Promise<Room> {
   const store = getRoomStore();
   if (await store.getRoom()) throw new Error("ROOM_EXISTS");
-  const roster = await store.loadSeedRoster();
-  const room = createRoom({ code: roomCode(), teams: roster.teams, accounts: roster.accounts, now });
+  const teams = await store.loadSeedTeams();
+  const room = createRoom({ code: roomCode(), teams, now });
   // The singleton primary key is the final authority if two host requests race.
   await store.createRoom(room);
   return room;
@@ -52,31 +52,19 @@ export async function authenticatePlayer(code: string, rawToken: string, now = D
   return { room, username: session.username, tokenHash: hash };
 }
 
-export async function loginPlayer(args: { code: string; username: string; password: string; now?: number }): Promise<{ playerToken: string; account: Account; joined: boolean; room: Room }> {
+export async function joinByName(args: { code: string; name: string; now?: number }): Promise<{ playerToken: string; account: Account; room: Room }> {
   const now = args.now ?? Date.now();
-  const username = args.username.trim().toLowerCase();
   const token = createPlayerToken();
   const hash = tokenHash(token);
   const result = await getRoomStore().mutateRoom(args.code, (room) => {
-    const account = room.accounts.find((candidate) => candidate.username === username);
-    // Both values are hashed before comparison to avoid a fast path for an
-    // unknown username. The fallback is never persisted or returned.
-    const expected = account?.password ?? "invalid-password-placeholder";
-    if (!account || !timingSafeTextEqual(args.password, expected)) throw new Error("UNAUTHENTICATED");
-    if (room.run.status !== "LOBBY" && !room.run.participants[username]) {
-      throw new RoomError("INVALID_TRANSITION", "Only participants who joined before round one may sign in.");
-    }
-    let next = structuredClone(room);
-    const sessionExpiry = new Date(now + PLAYER_SESSION_MS).toISOString();
-    next.sessions[hash] = { tokenHash: hash, username, expiresAt: sessionExpiry, revokedAt: null };
-    const join = next.run.status === "LOBBY" ? joinRun(next, username, next.run.id, now) : { room: next, joined: false };
-    next = join.room;
+    const { room: next, account } = registerPlayer(room, { name: args.name, now });
+    next.sessions[hash] = { tokenHash: hash, username: account.username, expiresAt: new Date(now + PLAYER_SESSION_MS).toISOString(), revokedAt: null };
     next.version += 1;
     next.updatedAt = new Date(now).toISOString();
-    return { room: next, value: { account: { username: account.username, displayName: account.displayName, teamId: account.teamId }, joined: join.joined } };
+    return { room: next, value: account };
   });
   if (!result) throw new Error("ROOM_NOT_FOUND");
-  return { playerToken: token, ...result.value, room: result.room };
+  return { playerToken: token, account: result.value, room: result.room };
 }
 
 export async function joinPlayer(code: string, username: string, runId: string, now = Date.now()): Promise<{ room: Room; joined: boolean }> {

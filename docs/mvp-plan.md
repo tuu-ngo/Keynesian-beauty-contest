@@ -70,6 +70,6 @@ M1a–M1d là bốn luồng triển khai độc lập **sau** khi M0 được me
 ## Rủi ro cần xử lý ở đúng mốc
 
 - `README.md` còn mô tả phạm vi 200 người/i18n/`p=4/3` cho bản đầy đủ; M0 phải giữ liên kết rõ với decisions để tránh triển khai nhầm phạm vi MVP.
-- Mật khẩu người chơi ở JSON dạng rõ theo lựa chọn sản phẩm; file chỉ được đọc phía server. Không nhúng seed vào bundle client, projection hoặc export. Host password/secret chỉ ở env.
+- Người chơi không có mật khẩu (vào bằng nickname + mã room); chỉ Host đăng nhập, Host password/secret chỉ ở env.
 - Polling 1 giây với khoảng 50 client là khoảng 50+ lượt đọc trạng thái mỗi giây khi mọi tab đang mở. Cần đo chi phí/độ trễ thực tế trên Vercel và giữ projection gọn; 304 không xóa chi phí truy vấn database.
 - `ROUND_OPEN` hết hạn được server kiểm tra khi request tiếp theo tới; Portal/Host đang mở bảo đảm có request đều. Nếu cần khóa đúng thời điểm khi không có client nào online, đó là yêu cầu scheduler riêng ngoài MVP.

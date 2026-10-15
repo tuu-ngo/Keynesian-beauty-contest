@@ -194,9 +194,9 @@ MVP dùng polling để đơn giản hóa vận hành. Vercel hiện hỗ trợ 
 | Phương thức & đường dẫn | Xác thực | Mục đích |
 |---------------|------|---------|
 | `POST /host/login` · `POST /host/logout` · `GET /host/session` | cookie Host | Đăng nhập/đăng xuất Host bằng `HOST_USERNAME`/`HOST_PASSWORD` |
-| `GET /room` · `POST /room` | cookie Host | Lấy room hiện tại / tạo room duy nhất từ roster seed |
+| `GET /room` · `POST /room` | cookie Host | Lấy room hiện tại / tạo room duy nhất với các đội trong seed |
 | `GET /room/state?code=…&view=…` | public; player token; cookie Host | Projection trạng thái theo vai trò (`ETag`/`304`) |
-| `POST /room/login` | không | `{ code, username, password }` → `{ playerToken }` |
+| `POST /room/login` | không | `{ code, name }` → `{ playerToken }` — vào lobby bằng nickname, không cần đăng nhập |
 | `POST /room/join` | player token | `{ runId }` — vào lobby của run mới sau RESET |
 | `PUT /room/pick` | player token | `{ runId, round, value, requestId }` |
 | `POST /room/command` | cookie Host | `OPEN_ROUND`, `LOCK_ROUND`, `REVEAL_ROUND`, `START_ESCALATION`, `UPDATE_SETTINGS`, `FINISH`, `RESET` |

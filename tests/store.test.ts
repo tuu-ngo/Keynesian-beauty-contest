@@ -28,7 +28,6 @@ describe("libSQL room store", () => {
     await store.createRoom(createRoom({
       code: "TEST",
       teams: [{ id: "team", name: "Team" }],
-      accounts: [{ username: "alice", password: "secret", displayName: "Alice", teamId: "team" }],
       now: 1_700_000_000_000,
     }));
 
