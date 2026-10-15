@@ -76,6 +76,7 @@ export function HostClient({ code }: { code: string }) {
         {notice && <p className={`form-message ${noticeOk ? "form-message--ok" : ""}`} role="status">{notice}</p>}
       </aside>
       <section className="host-live"><header><div><p className="eyeline">Live room</p><h2>{game.status === "ROUND_OPEN" ? `Round ${game.currentRound?.number}` : game.status.replaceAll("_", " ")}</h2></div><p>{game.submittedCount} of {game.activeCount} active players submitted</p></header>
+        <LiveLeaderboard game={game} />
         <RosterByTeam game={game} />
         <HostRoundDetail game={game} />
       </section>
@@ -107,6 +108,20 @@ function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy:
     <label><span>Points lost per loss</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={losePoints} onChange={(event) => setLosePoints(event.target.value)} /></label>
     <label><span>Max points per player</span><input type="number" inputMode="numeric" min={1} max={100000} step={1} placeholder="No limit" value={maxPoints} onChange={(event) => setMaxPoints(event.target.value)} /></label>
     <p>Changes apply to the next round. The open round keeps its saved settings. A loss only counts in rounds that have a winner; totals never go below 0.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
+}
+
+function LiveLeaderboard({ game }: { game: HostProjection }) {
+  const rows = game.individualLeaderboard.slice(0, 10);
+  const player = (username: string) => game.players.find((candidate) => candidate.username === username);
+  const teamOf = (teamId: string) => game.teams.find((team) => team.id === teamId);
+  return <section className="live-board" aria-label="Leaderboard">
+    <div className="live-board__players"><h2>Leaderboard</h2>
+      {rows.length === 0 ? <p>No players yet.</p> : <ol>{rows.map((row) => { const entry = player(row.username); const team = entry ? teamOf(entry.teamId) : undefined; return <li key={row.username} className={entry?.status === "ELIMINATED" ? "is-out" : undefined}><span className="live-board__rank">#{row.rank}</span><span className="live-board__name">{entry?.displayName ?? row.username}{team && <small><TeamMark name={team.name} color={team.color} />{team.name}</small>}</span><strong>{row.points}<small> pts</small></strong></li>; })}</ol>}
+    </div>
+    <div className="live-board__teams"><h2>Teams</h2>
+      <ol>{game.teamLeaderboard.map((row) => { const team = teamOf(row.teamId); return <li key={row.teamId}><span className="live-board__rank">#{row.rank}</span><span className="live-board__name">{team && <TeamMark name={team.name} color={team.color} />}{team?.name ?? row.teamId}</span><strong>{row.points}<small> pts</small></strong></li>; })}</ol>
+    </div>
+  </section>;
 }
 
 function RosterByTeam({ game }: { game: HostProjection }) {

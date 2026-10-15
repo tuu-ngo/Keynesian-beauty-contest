@@ -35,7 +35,8 @@ export const roundSettingsSchema = z.object({
   p: pSchema,
   min: z.literal(0),
   max: z.literal(100),
-  step: z.literal(0.1),
+  /** Picks are whole numbers now (step 1); 0.1 is kept so rooms and archives saved earlier still parse. */
+  step: z.union([z.literal(1), z.literal(0.1)]),
   timerSeconds: z.number().int().min(5).max(60 * 60).nullable(),
   /** Points a winner earns, points every non-winner loses (only in rounds that have a winner), and the per-player total cap (null = no cap). */
   winPoints: z.number().int().min(0).max(1000).default(10),

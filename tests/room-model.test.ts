@@ -40,7 +40,7 @@ describe("room model", () => {
   it("does not expose other players' picks before reveal", () => {
     let game = joinAll(room());
     game = command(game, "OPEN_ROUND").room;
-    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 12.3, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 13, requestId: crypto.randomUUID(), now: NOW }).room;
     game = submitPick(game, { username: "bea", runId: game.run.id, round: 1, value: 20, requestId: crypto.randomUUID(), now: NOW }).room;
 
     const publicState = project(game, "public", NOW);
@@ -52,10 +52,10 @@ describe("room model", () => {
     expect(stateResponseSchema.safeParse(playerState).success).toBe(true);
     expect(stateResponseSchema.safeParse(hostState).success).toBe(true);
 
-    expect(JSON.stringify(publicState)).not.toContain("12.3");
-    expect(JSON.stringify(publicState)).not.toContain("123");
-    expect(JSON.stringify(playerState)).toContain("123");
-    expect(JSON.stringify(playerState)).not.toContain("200");
+    expect(JSON.stringify(publicState)).not.toContain('"currentPickTenths"');
+    expect(JSON.stringify(publicState)).not.toContain('"valueTenths":130');
+    expect(JSON.stringify(playerState)).toContain('"currentPickTenths":130');
+    expect(JSON.stringify(playerState)).not.toContain('"valueTenths":200');
     expect(hostState.hostPicks).toBeNull();
 
     game = command(game, "LOCK_ROUND").room;
@@ -139,10 +139,10 @@ describe("room model", () => {
   it("hides open-round picks from a live Host export until the round locks", () => {
     let game = joinAll(room());
     game = command(game, "OPEN_ROUND").room;
-    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 12.3, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 13, requestId: crypto.randomUUID(), now: NOW }).room;
     expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({});
     game = command(game, "LOCK_ROUND").room;
-    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 123 });
+    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 130 });
   });
 
   it("drops stale pick and command receipts so the snapshot does not grow all game", () => {
@@ -220,5 +220,13 @@ describe("room model", () => {
       for (const ok of [60, 90, 120, null]) expect(hostCommandSchema.safeParse(update(ok)).success).toBe(true);
       expect(hostCommandSchema.safeParse(update(45)).success).toBe(false);
     });
+  });
+  it("rejects picks that are not whole numbers between 0 and 100", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    const pick = (value: number) => () => submitPick(game, { username: "ada", runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW });
+    for (const bad of [12.5, 0.1, -1, 101]) expect(pick(bad)).toThrow();
+    expect(pick(0)().result.pick).toBe(0);
+    expect(pick(100)().result.pick).toBe(1000);
   });
 });

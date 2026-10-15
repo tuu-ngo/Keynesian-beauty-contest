@@ -131,7 +131,7 @@ export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
   p: "0.8",
   min: 0,
   max: 100,
-  step: 0.1,
+  step: 1,
   timerSeconds: 60,
   winPoints: 10,
   losePoints: 0,
@@ -195,10 +195,10 @@ function decimal(numerator: bigint, denominator: bigint, digits = 10): string {
   return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
 
+/** Picks are whole numbers 0-100; they are stored as integer tenths so scoring and archives stay exact. */
 function exactTenths(value: number): number | null {
-  if (!Number.isFinite(value) || value < 0 || value > 100) return null;
-  const tenths = Math.round(value * 10);
-  return Math.abs(value * 10 - tenths) < 1e-8 ? tenths : null;
+  if (!Number.isInteger(value) || value < 0 || value > 100) return null;
+  return value * 10;
 }
 
 function rank<T extends { points: number }>(rows: T[]): Array<T & { rank: number }> {
@@ -597,7 +597,7 @@ export function submitPick(room: Room, args: { username: string; runId: string; 
   if (!round || round.number !== args.round) throw new RoomError("RUN_MISMATCH", "This is not the current round.");
   if (!participant || participant.status !== "ACTIVE") throw new RoomError("FORBIDDEN", "Only active participants may submit a pick.");
   const valueTenths = exactTenths(args.value);
-  if (valueTenths === null) throw new RoomError("VALIDATION_ERROR", "Pick must be between 0 and 100 in increments of 0.1.");
+  if (valueTenths === null) throw new RoomError("VALIDATION_ERROR", "Pick must be a whole number from 0 to 100.");
   round.picks[args.username] = valueTenths;
   next.version += 1;
   next.updatedAt = iso(args.now);
