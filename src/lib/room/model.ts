@@ -139,7 +139,6 @@ export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
   timerSeconds: 60,
   winPoints: 10,
   losePoints: 0,
-  maxPoints: null,
   startPoints: 100,
 };
 
@@ -293,6 +292,15 @@ export function purgeExpiredArchives(room: Room, now: number): Room {
   return next;
 }
 
+/** The pick form starts at 50, so an active player who never pressed Save is counted at 50 (stored as tenths). */
+export const DEFAULT_PICK_TENTHS = 500;
+
+function fillDefaultPicks(run: Run, round: InternalRound): void {
+  for (const participant of activeParticipants(run)) {
+    round.picks[participant.username] ??= DEFAULT_PICK_TENTHS;
+  }
+}
+
 export function resolveDeadline(room: Room, now: number): Room {
   const round = currentRound(room.run);
   if (room.run.status !== "ROUND_OPEN" || !round?.deadlineAt || round.timerPaused || round.deadlineAt > iso(now)) return room;
@@ -300,6 +308,7 @@ export function resolveDeadline(room: Room, now: number): Room {
   next.run.status = "ROUND_LOCKED";
   const nextRound = currentRound(next.run)!;
   nextRound.lockedAt = iso(now);
+  fillDefaultPicks(next.run, nextRound);
   return next;
 }
 
@@ -411,14 +420,13 @@ function score(round: InternalRound, run: Run): RoundResult {
   // Snapshots saved before these settings existed lack them, hence the fallbacks.
   const winPoints = round.settings.winPoints ?? DEFAULT_ROUND_SETTINGS.winPoints;
   const losePoints = round.settings.losePoints ?? DEFAULT_ROUND_SETTINGS.losePoints;
-  const maxPoints = round.settings.maxPoints ?? null;
   const winnerSet = new Set(winners);
   const pointsByUsername: Record<string, number> = {};
   for (const participant of activeParticipants(run)) {
     const raw = winnerSet.has(participant.username) ? winPoints : winners.length > 0 ? -losePoints : 0;
     const total = participant.totalPoints;
-    // Total never drops below 0 and never exceeds the cap (a cap lowered mid-game does not claw back points).
-    const next = raw >= 0 ? Math.min(total + raw, Math.max(maxPoints ?? Infinity, total)) : Math.max(0, total + raw);
+    // A total never drops below 0.
+    const next = Math.max(0, total + raw);
     if (next !== total) pointsByUsername[participant.username] = next - total;
   }
   return {
@@ -553,6 +561,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (run.status !== "ROUND_OPEN") throw new RoomError("INVALID_TRANSITION");
       run.status = "ROUND_LOCKED";
       currentRound(run)!.lockedAt = iso(now);
+      fillDefaultPicks(run, currentRound(run)!);
       changed = true;
       break;
     }

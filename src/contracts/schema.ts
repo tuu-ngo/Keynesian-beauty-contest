@@ -38,10 +38,9 @@ export const roundSettingsSchema = z.object({
   /** Picks are whole numbers now (step 1); 0.1 is kept so rooms and archives saved earlier still parse. */
   step: z.union([z.literal(1), z.literal(0.1)]),
   timerSeconds: z.number().int().min(5).max(60 * 60).nullable(),
-  /** Points a winner earns, points every non-winner loses (only in rounds that have a winner), and the per-player total cap (null = no cap). */
+  /** Points a winner earns, points every non-winner loses (only in rounds that have a winner). */
   winPoints: z.number().int().min(0).max(1000).default(10),
   losePoints: z.number().int().min(0).max(1000).default(0),
-  maxPoints: z.number().int().min(1).max(100000).nullable().default(null),
   /** Points every player starts the run with; a player whose total reaches 0 is eliminated. 0 turns this off. */
   startPoints: z.number().int().min(0).max(100000).default(100),
 }).strict();
@@ -57,7 +56,7 @@ export const roundResultSchema = z.object({
   eliminationCandidates: z.array(z.string()),
   /** Players eliminated this round because their points reached 0. */
   pointEliminatedUsernames: z.array(z.string()).default([]),
-  /** Signed points actually applied this round (after the max-points cap and the zero floor). */
+  /** Signed points actually applied this round (after the zero floor). */
   pointsByUsername: z.record(z.number().int()),
 }).strict();
 
@@ -175,7 +174,6 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
       timerSeconds: timerOptionSchema.optional(),
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),
-      maxPoints: z.number().int().min(1).max(100000).nullable().optional(),
       startPoints: z.number().int().min(0).max(100000).optional(),
     }).strict(),
   }).strict(),
