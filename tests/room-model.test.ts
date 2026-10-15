@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostCommandSchema, stateResponseSchema, type HostCommand } from "@/contracts";
-import { applyCommand, createRoom, project, publicArchive, registerPlayer, submitPick, type Room } from "@/lib/room";
+import { applyCommand, createRoom, project, publicArchive, registerPlayer, resolveDeadline, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
 
@@ -60,8 +60,9 @@ describe("room model", () => {
 
     game = command(game, "LOCK_ROUND").room;
     const lockedPublic = project(game, "public", NOW);
-    expect(lockedPublic.submittedCount).toBe(2);
-    expect(lockedPublic.players.filter((player) => player.hasSubmitted)).toHaveLength(2);
+    // Cy never saved a pick, so the default of 50 is applied at lock.
+    expect(lockedPublic.submittedCount).toBe(3);
+    expect(lockedPublic.players.filter((player) => player.hasSubmitted)).toHaveLength(3);
   });
 
   it("scores exact fractional targets, records command receipts, and only reveals after lock", () => {
@@ -143,7 +144,7 @@ describe("room model", () => {
     game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 13, requestId: crypto.randomUUID(), now: NOW }).room;
     expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({});
     game = command(game, "LOCK_ROUND").room;
-    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 130 });
+    expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].picks).toEqual({ ada: 130, bea: 500, cy: 500 });
   });
 
   it("drops stale pick and command receipts so the snapshot does not grow all game", () => {
@@ -273,5 +274,25 @@ describe("room model", () => {
       expect(game.run.participants.bea.totalPoints).toBe(0);
       expect(game.run.participants.bea.status).toBe("ACTIVE");
     });
+  });
+
+  it("counts the default pick of 50 for players who never pressed save", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 20, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = command(game, "LOCK_ROUND").room;
+    expect(game.run.rounds[0].picks).toEqual({ ada: 200, bea: 500, cy: 500 });
+    game = command(game, "REVEAL_ROUND").room;
+    expect(game.run.rounds[0].result!.average).toBe("40");
+  });
+
+  it("applies the default pick when the round deadline locks it", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    const deadline = Date.parse(game.run.rounds[0].deadlineAt!);
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = resolveDeadline(game, deadline + 1);
+    expect(game.run.status).toBe("ROUND_LOCKED");
+    expect(game.run.rounds[0].picks).toEqual({ ada: 100, bea: 500, cy: 500 });
   });
 });
