@@ -52,7 +52,6 @@ type RoundSettings = {
   timerSeconds: number | null; // 60 | 90 | 120 from the host UI (default 60); null = off
   winPoints: number;  // default 10
   losePoints: number; // default 0; deducted from every non-winner, only in rounds that have a winner
-  maxPoints: number | null; // per-player total cap; null = no cap. Totals are floored at 0
   startPoints: number; // default 100; everyone starts the run with this and is eliminated at 0 points. 0 = off
 };
 type RoundResult = {
@@ -63,7 +62,7 @@ type RoundResult = {
   eliminationSeed: string | null;
   eliminationCandidates: string[];
   pointEliminatedUsernames: string[]; // eliminated this round because their points reached 0
-  pointsByUsername: Record<string, number>; // signed delta actually applied (after cap/floor); omitted when 0
+  pointsByUsername: Record<string, number>; // signed delta actually applied (after the zero floor); omitted when 0
 };
 type Round = {
   number: number;
@@ -146,7 +145,7 @@ Máy trạng thái: `LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED �
 ```ts
 type HostCommand = { commandId: string; expectedVersion: number } & (
   | { type: 'OPEN_ROUND' | 'LOCK_ROUND' | 'REVEAL_ROUND' | 'START_ESCALATION' | 'FINISH' | 'RESET' }
-  | { type: 'UPDATE_SETTINGS'; payload: { p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; maxPoints?: number | null; startPoints?: number } }
+  | { type: 'UPDATE_SETTINGS'; payload: { p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number } }
 );
 ```
 

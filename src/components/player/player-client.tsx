@@ -78,11 +78,27 @@ export function PlayerClient({ code }: { code: string }) {
 function PlayerStage({ game, token, onAnnouncement, refresh }: { game: PlayerProjection; token: string; onAnnouncement: (value: string) => void; refresh: () => Promise<void> }) {
   const result = latestResult(game);
   if (game.status === "LOBBY") return <section className="player-stage"><p className="eyeline">You&apos;re in</p><h1>Waiting in the lobby</h1><p>{game.players.length ? `${game.players.length} participant${game.players.length === 1 ? "" : "s"} joined. The host will open round one when everyone is ready.` : "No players have joined yet."}</p></section>;
+  if (game.self.status === "ELIMINATED" && game.status !== "FINISHED") return <EliminatedScreen game={game} />;
   if (game.status === "ROUND_OPEN" && game.self.status === "ACTIVE" && game.currentRound) return <PickForm game={game} token={token} refresh={refresh} onAnnouncement={onAnnouncement} />;
   if (game.status === "ROUND_OPEN" && game.currentRound) return <section className="player-stage"><p className="eyeline">Round {game.currentRound.number}</p><h1>You&apos;re spectating</h1><p>You were eliminated, but you can follow every result here.</p><p className="countdown"><Countdown deadlineAt={game.currentRound.deadlineAt} serverNow={game.serverNow} /></p><p>{game.submittedCount} of {game.activeCount} active players have submitted.</p></section>;
   if (game.status === "ROUND_LOCKED") return <section className="player-stage"><p className="eyeline">Round {game.currentRound?.number ?? ""}</p><h1>Picks are locked.</h1><p>{game.self.currentPickTenths === null ? "You did not save a pick this round." : `Your last saved pick was ${tenths(game.self.currentPickTenths)}.`} The host will reveal the result shortly.</p></section>;
   if (result) return <PlayerResult game={game} />;
   return <section className="player-stage"><h1>Waiting for the result</h1><p>The latest confirmed game state is shown here.</p></section>;
+}
+
+function EliminatedScreen({ game }: { game: PlayerProjection }) {
+  const outRound = game.self.eliminatedInRound;
+  const round = game.revealedRounds.find((candidate) => candidate.number === outRound);
+  const ranOutOfPoints = Boolean(round?.pointEliminatedUsernames.includes(game.self.username));
+  const live = game.currentRound?.deadlineAt ?? null;
+  return <section className="player-stage player-stage--out" aria-live="polite">
+    <p className="eyeline">Round {outRound ?? "—"}</p>
+    <h1>You&apos;ve been eliminated</h1>
+    <p>{ranOutOfPoints ? "You ran out of points, so you can't play any more." : "You were knocked out in the escalation rounds, so you can't play any more."}</p>
+    <div className="metric-pair"><Metric label="Final points" value={String(game.self.totalPoints)} /><Metric label="Players left" value={String(game.activeCount)} /></div>
+    <p>You can keep watching on the <Link className="text-link" href={`/portal/${game.code}`} target="_blank" rel="noreferrer">portal</Link>. The next game will start from the lobby.</p>
+    {live && game.status === "ROUND_OPEN" && <p className="countdown"><Countdown deadlineAt={live} serverNow={game.serverNow} /></p>}
+  </section>;
 }
 
 function PickForm({ game, token, refresh, onAnnouncement }: { game: PlayerProjection; token: string; refresh: () => Promise<void>; onAnnouncement: (value: string) => void }) {

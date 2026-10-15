@@ -435,3 +435,7 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 .live-board strong small { font-size: 14px; }
 .live-board__teams li { font-size: 22px; }
 @media (max-width: 900px) { .live-board { grid-template-columns: minmax(0, 1fr); } }
+
+/* Shown to a player who is out: no pick form, clearly marked as eliminated. */
+.player-stage--out { background: #ffd6d6; }
+.player-stage--out h1 { max-width: none; }

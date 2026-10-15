@@ -135,7 +135,6 @@ export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
   timerSeconds: 60,
   winPoints: 10,
   losePoints: 0,
-  maxPoints: null,
   startPoints: 100,
 };
 
@@ -406,14 +405,13 @@ function score(round: InternalRound, run: Run): RoundResult {
   // Snapshots saved before these settings existed lack them, hence the fallbacks.
   const winPoints = round.settings.winPoints ?? DEFAULT_ROUND_SETTINGS.winPoints;
   const losePoints = round.settings.losePoints ?? DEFAULT_ROUND_SETTINGS.losePoints;
-  const maxPoints = round.settings.maxPoints ?? null;
   const winnerSet = new Set(winners);
   const pointsByUsername: Record<string, number> = {};
   for (const participant of activeParticipants(run)) {
     const raw = winnerSet.has(participant.username) ? winPoints : winners.length > 0 ? -losePoints : 0;
     const total = participant.totalPoints;
-    // Total never drops below 0 and never exceeds the cap (a cap lowered mid-game does not claw back points).
-    const next = raw >= 0 ? Math.min(total + raw, Math.max(maxPoints ?? Infinity, total)) : Math.max(0, total + raw);
+    // A total never drops below 0.
+    const next = Math.max(0, total + raw);
     if (next !== total) pointsByUsername[participant.username] = next - total;
   }
   return {
