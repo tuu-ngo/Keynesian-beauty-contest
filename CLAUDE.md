@@ -37,7 +37,7 @@ Request flow: route handler in `src/app/api/**` -> auth/validation -> `src/lib/s
 - Opening round 1 locks participation; only players who joined in `LOBBY` belong to the run. Needs at least two active participants.
 - Picks are stored as integer tenths and `p` as a `bigint` fraction; average, target and distance are exact. Never compare floats.
 - Reveal in `NORMAL`: closest to target wins 10 points; if every active player picked 0 the run enters escalation (Nash) with Rule 1. Host can also `START_ESCALATION` after any normal reveal.
-- Reveal in `ESCALATION`: Rule 1 disqualifies duplicate picks; Rule 2 (activated after the first elimination) makes a single 100-picker win when someone picked 0. Exactly one player is eliminated: non-submitters first, then Rule 1 duplicates, then largest distance; ties are broken by the seed, which is stored in the round result. When one active player remains the run becomes `FINISHED` in the same reveal.
+- Reveal in `ESCALATION`: Rule 1 disqualifies duplicate picks; Rule 2 (activated after the first elimination) makes a single 100-picker win when someone picked 0. Exactly one player is eliminated: Rule 1 duplicates, then largest distance; ties are broken by the seed, which is stored in the round result. When one active player remains the run becomes `FINISHED` in the same reveal.
 - `FINISH` and `RESET` archive the run (only if it has rounds) as a `PublicArchive`, kept 7 days. `csvForArchive` builds the export. Team score is the sum of member points, eliminated players included.
 - Deadlines: there is no background job. `resolveDeadline` locks a lapsed open round lazily; `room-service` runs it (plus `purgeExpiredArchives`) on every read and before every write.
 
