@@ -5,14 +5,15 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RoomClientError, roomRequest, savePlayerToken, stateUrl, getPlayerToken } from "@/lib/api/room-client";
 
-type LoginResult = { playerToken: string; account: { username: string; displayName: string; teamId: string } };
+type JoinResult = { playerToken: string; account: { username: string; displayName: string; teamId: string } };
+
+const NAME_MAX = 20;
 
 export function PlayerLoginForm() {
   const router = useRouter();
   const query = useSearchParams();
   const [code, setCode] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -21,42 +22,45 @@ export function PlayerLoginForm() {
     if (/^[A-Z]{4}$/.test(fromPortal)) setCode(fromPortal);
   }, [query]);
 
+  // A returning player with a stored token goes straight back to their game.
+  useEffect(() => {
+    if (!/^[A-Z]{4}$/.test(code)) return;
+    const restored = getPlayerToken(code);
+    if (!restored) return;
+    let active = true;
+    void fetch(stateUrl(code, "player"), { headers: { Authorization: `Bearer ${restored}` }, cache: "no-store" })
+      .then((response) => { if (response.ok && active) router.push(`/play/${code}`); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [code, router]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedCode = code.trim().toUpperCase();
-    const normalizedName = username.trim();
+    const normalizedName = name.replace(/\s+/g, " ").trim();
     if (!/^[A-Z]{4}$/.test(normalizedCode)) {
       setMessage("Enter the four-letter game code.");
       return;
     }
-    if (!normalizedName || !password) {
-      setMessage("Enter your username and password.");
+    if (!normalizedName) {
+      setMessage("Enter a nickname.");
       return;
     }
     setBusy(true);
     setMessage("");
     try {
-      const restored = getPlayerToken(normalizedCode);
-      if (restored) {
-        const response = await fetch(stateUrl(normalizedCode, "player"), { headers: { Authorization: `Bearer ${restored}` }, cache: "no-store" });
-        if (response.ok) {
-          savePlayerToken(normalizedCode, restored);
-          router.push(`/play/${normalizedCode}`);
-          return;
-        }
-      }
-      const result = await roomRequest<LoginResult>("/api/room/login", {
+      const result = await roomRequest<JoinResult>("/api/room/login", {
         method: "POST",
-        body: { code: normalizedCode, username: normalizedName, password },
+        body: { code: normalizedCode, name: normalizedName },
       });
       savePlayerToken(normalizedCode, result.playerToken);
       router.push(`/play/${normalizedCode}`);
     } catch (error) {
-      if (error instanceof RoomClientError && error.problem.code === "INVALID_TRANSITION") {
-        setMessage("Only participants who joined before round one can return to this game.");
-      } else {
-        setMessage(error instanceof RoomClientError ? "We could not sign you in. Check the room code, username, and password." : "Network connection failed. Your entries are still here; try again.");
-      }
+      if (!(error instanceof RoomClientError)) setMessage("Network connection failed. Your entries are still here; try again.");
+      else if (error.problem.code === "NAME_TAKEN") setMessage("That nickname is already taken in this game. Try another one.");
+      else if (error.problem.code === "INVALID_TRANSITION") setMessage("This game has already started. You can join when the host starts a new game.");
+      else if (error.problem.code === "ROOM_NOT_FOUND") setMessage("We could not find that game. Check the room code.");
+      else setMessage(error.problem.message);
     } finally {
       setBusy(false);
     }
@@ -75,7 +79,7 @@ export function PlayerLoginForm() {
       <form className="form-panel" onSubmit={submit} noValidate>
         <div>
           <h2>Join the game</h2>
-          <p>Sign in with the roster account provided by your facilitator.</p>
+          <p>Enter the room code and pick a nickname. No account needed.</p>
         </div>
         <label>
           <span>Room code</span>
@@ -83,15 +87,11 @@ export function PlayerLoginForm() {
           <small id="room-code-help">Four letters, shown on the public Portal.</small>
         </label>
         <label>
-          <span>Username</span>
-          <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Your roster username" />
-        </label>
-        <label>
-          <span>Password</span>
-          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <span>Nickname</span>
+          <input autoComplete="nickname" value={name} onChange={(event) => setName(event.target.value.slice(0, NAME_MAX))} placeholder="Shown on the Portal" maxLength={NAME_MAX} />
         </label>
         {message && <p className="form-message" role="alert">{message}</p>}
-        <button className="button button--primary" disabled={busy}>{busy ? "Signing in…" : "Join game"}</button>
+        <button className="button button--primary" disabled={busy}>{busy ? "Joining…" : "Join game"}</button>
       </form>
     </section>
   </main>;

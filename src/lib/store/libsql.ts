@@ -1,6 +1,7 @@
 import { createClient } from "@libsql/client";
+import type { Team } from "@/contracts";
 import type { Room } from "@/lib/room";
-import type { RoomStore, SeedRoster } from "./room-types";
+import type { RoomStore } from "./room-types";
 
 /**
  * Small durable repository for the MVP.  The game engine owns the shape of the
@@ -109,29 +110,20 @@ export class LibsqlStore implements RoomStore {
     throw new Error("VERSION_CONFLICT");
   }
 
-  async loadSeedRoster(): Promise<SeedRoster> {
+  async loadSeedTeams(): Promise<Team[]> {
     await this.ready;
     try {
-      const [teamResult, accountResult] = await Promise.all([
-        this.client.execute("SELECT id, name, image, color FROM seed_teams ORDER BY id"),
-        this.client.execute("SELECT username, password, display_name, team_id FROM seed_users ORDER BY username"),
-      ]);
+      const teamResult = await this.client.execute("SELECT id, name, image, color FROM seed_teams ORDER BY id");
       const teams = teamResult.rows.map((row) => ({
         id: String(row.id),
         name: String(row.name),
         ...(typeof row.image === "string" ? { image: row.image } : {}),
         ...(typeof row.color === "string" ? { color: row.color } : {}),
       }));
-      const accounts = accountResult.rows.map((row) => ({
-        username: String(row.username).trim().toLowerCase(),
-        password: String(row.password),
-        displayName: typeof row.display_name === "string" && row.display_name.trim() ? row.display_name.trim() : String(row.username),
-        teamId: String(row.team_id),
-      }));
-      if (teams.length === 0 || accounts.length === 0) throw new Error("Seed roster is empty.");
-      return { teams, accounts };
+      if (teams.length === 0) throw new Error("Seed roster has no teams.");
+      return teams;
     } catch (error) {
-      if (error instanceof Error && error.message === "Seed roster is empty.") throw error;
+      if (error instanceof Error && error.message === "Seed roster has no teams.") throw error;
       throw new Error("Roster seed is unavailable. Run `npm run seed-db` before creating the room.");
     }
   }

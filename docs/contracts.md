@@ -8,8 +8,8 @@
 |---|---|
 | `room` | Room duy nhất của ứng dụng; có `code` 4 chữ cái, roster snapshot và các run. Reset không tạo room mới. |
 | `run` | Một lần chơi từ Lobby đến Finish hoặc Reset, có `runId` riêng. Các vòng, điểm và trạng thái loại thuộc run. |
-| `account` | Tài khoản từ `db/seed.sql`, có `username`/`password` và `teamId`. Chưa đăng nhập thì chưa là participant. |
-| `participant` | Account đã đăng nhập room trước khi vòng 1 của run mở. Danh sách participant bị khóa khi mở vòng 1. |
+| `account` | Danh tính người chơi tạo khi nhập nickname + mã room (kiểu Kahoot): `username` (nickname chuẩn hóa, lowercase), `displayName`, `teamId` (server tự gán). Không có mật khẩu; chỉ Host đăng nhập. Nickname là duy nhất trong room (qua mọi run). |
+| `participant` | Account đã vào room trước khi vòng 1 của run mở. Danh sách participant bị khóa khi mở vòng 1. |
 | `active` | Participant chưa bị loại. Mất kết nối không đổi trạng thái này. |
 | `pick` | Lựa chọn cuối cùng của participant trong một vòng, số nguyên `0..1000` biểu diễn bước `0.1`. |
 | `version` | Số nguyên tăng sau mỗi mutation có thể nhìn thấy; dùng cho `ETag`, polling và lệnh Host. |
@@ -18,16 +18,15 @@
 
 ## 2. Seed roster SQL ở `db/`
 
-[`db/seed.sql`](../db/seed.sql) tạo hai bảng source `seed_teams` và
-`seed_users`, đồng thời chứa roster. Chạy `npm run seed-db` trước lần tạo room
-đầu tiên.
-Một team có `id`, `name`, `image?`, `color?`; một user có `username`,
-`password`, `display_name?`, `team_id`. `display_name` được map sang
-`displayName` trong contract TypeScript.
+[`db/seed.sql`](../db/seed.sql) tạo bảng source `seed_teams` chứa danh sách
+đội. Chạy `npm run seed-db` trước lần tạo room đầu tiên. Không có bảng người
+chơi: người chơi chỉ nhập nickname và mã room như Kahoot.
+Một team có `id`, `name`, `image?`, `color?`.
 
-- `image`, `color`, `displayName` tùy chọn. `image` chỉ trỏ tới asset tĩnh trong `public/teams/`. Khi không có ảnh, UI hiện tên/màu dự phòng.
-- `username` duy nhất theo dạng trim + lowercase; `displayName` hiển thị như văn bản thuần. `teamId` phải tồn tại. `id` đội duy nhất. Từ chối file sai schema khi tạo room; không yêu cầu số đội/người cụ thể. Không bao giờ trả `password` qua state/export công khai.
-- Khi tạo room, server snapshot cả đội và account vào store. Sửa file rồi deploy lại không thay đổi room đã có. Reset giữ snapshot này. Credential được lưu ở vùng server riêng, không nằm trong `RoomState` trả cho client.
+- `image`, `color` tùy chọn. `image` chỉ trỏ tới asset tĩnh trong `public/teams/`. Khi không có ảnh, UI hiện tên/màu dự phòng.
+- `id` đội duy nhất (không phân biệt hoa thường). Từ chối seed không có đội khi tạo room.
+- Nickname: loại thẻ HTML/ký tự điều khiển, gộp khoảng trắng, trim, dài 1–20 ký tự; `username` = nickname chuẩn hóa dạng lowercase, duy nhất trong room. Server tự gán người chơi vào đội đang ít account nhất (hòa thì lấy đội đứng trước). Tối đa 200 account mỗi room.
+- Khi tạo room, server snapshot danh sách đội vào store. Sửa file rồi deploy lại không thay đổi room đã có. Reset giữ đội và account.
 - `db/keynesian-beauty-contest.dev.db` là SQLite database runtime trong dev, được gitignore và được migrate/kiểm tra schema khi server dev khởi động. Chỉ hỗ trợ một process dev ghi file.
 
 ## 3. Kiểu dữ liệu dùng chung
@@ -170,9 +169,9 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 | `POST /api/host/login` | public | `{username,password}` → cookie Host `HttpOnly`, `SameSite=Strict`. Credentials so với env. |
 | `POST /api/host/logout` | Host | Xóa cookie. |
 | `GET /api/room` | Host | Mã room/run hiện tại nếu đã tạo; không có thì `404`. |
-| `POST /api/room` | Host | Tạo room duy nhất từ roster trong `seed_teams`/`seed_users` → `{code, runId, version}`; lần sau `409 ROOM_EXISTS`. |
+| `POST /api/room` | Host | Tạo room duy nhất với các đội trong `seed_teams` → `{code, runId, version}`; lần sau `409 ROOM_EXISTS`. |
 | `GET /api/room/state?code=ABCD&view=public|player|host` | Public, Player hoặc Host | `view=public` không cần credential; `player` cần Player token; `host` cần Host cookie. Server kiểm tra quyền trước khi trả projection/`304`; mã sai → `404`. |
-| `POST /api/room/login` | account seed | `{code,username,password}` → `{playerToken, account}`. Token mới cho account, tự join nếu run còn ở LOBBY; sau đó chỉ account đã là participant được đăng nhập lại. |
+| `POST /api/room/login` | public | `{code,name}` → `{playerToken, account, runId, version}`. Tạo account theo nickname và join run hiện tại; chỉ khi run ở LOBBY (`409 INVALID_TRANSITION` nếu đã bắt đầu). Nickname trùng → `409 NAME_TAKEN`; room đầy → `409 ROOM_FULL`. Người chơi quay lại bằng token đã lưu; mất token thì không nhận lại nickname cũ được. |
 | `POST /api/room/join` | Player token | `{runId}` → `{joined,version}`; idempotent. Chỉ thêm participant ở LOBBY; dùng khi token cũ nhận `runId` mới sau reset. |
 | `PUT /api/room/pick` | Player token | `{runId,round,value,requestId}` → `{acceptedVersion,pick}`. |
 | `POST /api/room/command` | Host | `{type,commandId,expectedVersion,payload?}` → `{version,status,runId}`. |
@@ -181,12 +180,12 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 
 `GET state` dùng cùng path với `view` tường minh để Portal luôn nhận public projection, kể cả khi cùng trình duyệt có cookie Host. `view` là yêu cầu về dữ liệu, không phải bằng chứng xác thực. Response có `version`, `serverNow`, `runId`, `status`, `phase`, `teams`, tiến độ, bảng điểm, dữ liệu theo trạng thái. Cụ thể:
 
-- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Sau reveal chỉ có pick của vòng đã công bố và dữ liệu tổng hợp. Không có password/token.
+- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Sau reveal chỉ có pick của vòng đã công bố và dữ liệu tổng hợp. Không có token.
 - **Player:** PublicProjection cộng pick hiện tại của chính mình và trạng thái riêng. Không có pick của người khác trước reveal.
 - **Host:** danh sách đã/chưa gửi khi vòng mở; chỉ thấy pick của người khác sau `ROUND_LOCKED`; có thể xem archive qua endpoint Host riêng.
 - Mỗi trạng thái ứng với `ETag: "<version>-<projection-role>-<runId>"`; 304 chỉ sau khi xác thực role và kiểm tra version. Poll mỗi 1 giây, thêm jitter nhỏ và tránh request chồng. Client refetch ngay khi tab hiện lại hoặc mạng phục hồi. Nếu dữ liệu run FINISHED đã hết hạn mà room shell còn, API trả `410 RUN_EXPIRED`; Portal hiển thị thông báo thay vì trang trắng, Host vẫn có thể RESET.
 - Host cookie dùng `HttpOnly`, `Secure` ở production, `SameSite=Strict`; API ghi kiểm tra `Origin`. Login Host/Player và pick có rate limit cơ bản.
-- `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,username,displayName,teamId,pick,distance,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có password/token. Archive chỉ Host xem và xuất.
+- `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,username,displayName,teamId,pick,distance,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có token. Archive chỉ Host xem và xuất.
 
 Biến môi trường: `HOST_USERNAME`, `HOST_PASSWORD`, `HOST_SESSION_SECRET` (ngẫu nhiên, >=128 bit), `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `NEXT_PUBLIC_BASE_URL`. Dev mặc định `TURSO_DATABASE_URL=file:db/keynesian-beauty-contest.dev.db`; production bắt buộc `TURSO_DATABASE_URL` là URL `libsql://`/`https://` của Turso và có `TURSO_AUTH_TOKEN`. Không đưa token vào `NEXT_PUBLIC_*`.
 
@@ -210,5 +209,5 @@ interface Store {
 1. Seed hợp lệ, team tham chiếu sai, username trùng khác hoa/thường, ảnh tùy chọn.
 2. State transition hợp lệ/sai; `commandId` lặp; `expectedVersion` cũ; reset tạo `runId` mới và giữ archive cũ.
 3. Số học `0.8`, `2/3`, `1/2`, hòa, 0 pick, không gửi, trùng đôi/ba, Rule 2 và fallback, Nash, Host escalation, loại bằng seed.
-4. Public/Player/Host projection tại OPEN, LOCKED, REVEALED không rò pick, password hoặc token.
+4. Public/Player/Host projection tại OPEN, LOCKED, REVEALED không rò pick hoặc token.
 5. SQLite dev database khôi phục state sau restart; Turso/libSQL không mất pick khi 50 request đồng thời.

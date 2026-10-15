@@ -129,7 +129,7 @@ do not let concurrent Functions race to migrate the database.
 |---|---|---|
 | `schema_migrations` | `id`, `applied_at` | records ordered migrations |
 | `rooms` | singleton `id = 1`, `code`, `version`, state/settings fields | durable room shell and compare-and-swap version |
-| `accounts` | `(room_id, username)`, `password_secret`, team/display fields | immutable roster snapshot; excluded from projections/export |
+| `accounts` | `(room_id, username)`, team/display fields | players who joined by nickname; kept across runs |
 | `runs` | `run_id`, `room_id`, status/phase/rules/settings, timestamps | one resettable game run |
 | `participants` | `(run_id, username)`, status, points, placement | active/eliminated status and totals |
 | `rounds` | `(run_id, number)`, settings, timestamps, result JSON | round snapshot and audited result |
@@ -208,15 +208,20 @@ accepted from a query parameter or request body.
 
 ### Player
 
-`POST /api/room/login` validates username/password against the server-only
-roster snapshot, canonicalizing username as `trim().toLowerCase()`. Generate a
+Players do not sign in (Kahoot-style). `POST /api/room/login` takes
+`{code, name}`, normalizes the nickname (strip markup and control characters,
+collapse whitespace, 1–20 characters) and registers it as a new account whose
+username is the lowercased nickname. Nicknames are unique per room; a duplicate
+is `409 NAME_TAKEN`. The server assigns the team with the fewest accounts.
+Generate a
 cryptographically random opaque token (minimum 256 bits); return it once to the
 browser, which may keep it in local storage. Persist only a SHA-256 hash of the
 token with username and expiry. The API receives the raw player token in an
 `Authorization: Bearer` header, never in a URL or cookie.
 
-A login in `LOBBY` joins the current run idempotently. After participation is
-locked, it can authenticate only an account already in that run. After reset,
+Joining by nickname is allowed only in `LOBBY`; after participation is locked
+new nicknames are rejected with `409 INVALID_TRANSITION` and returning players
+rely on their stored token. A lost token cannot reclaim a nickname. After reset,
 an existing valid token may call `join` for the new `runId` while that run is in
 the lobby. Tokens do not grant Host privileges.
 
@@ -226,10 +231,10 @@ the lobby. Tokens do not grant Host privileges.
   domain work.
 - Check a same-origin `Origin` value for cookie-authenticated host writes. In
   development, permit the configured localhost origin only.
-- Apply rate limits before password comparison and before accepting picks. A
-  practical initial policy is 10 login attempts/minute per IP + username,
+- Apply rate limits before registering a nickname and before accepting picks. A
+  practical initial policy is 240 joins/minute per IP (classrooms share an IP),
   120 pick requests/minute per player, and 30 host commands/minute per host.
-- Never log a password, raw player token, host cookie, or unredacted internal
+- Never log a Host password, raw player token, host cookie, or unredacted internal
   room envelope.
 - Use `Cache-Control: no-store` on authenticated responses. Public state may
   use `private, no-cache` so the client still revalidates its ETag.
@@ -479,6 +484,5 @@ currently fixed and should be confirmed before M2/M3:
    or supplied/chosen by the Host? (This specification assumes random.)
 3. Will preview/staging and production use separate Turso databases? This
    specification assumes separate databases rather than a shared namespace.
-4. Are the roster passwords intentionally allowed to remain plaintext in a
-   server-only seed file for this MVP, as current contracts imply, or should we
-   support password hashes before deployment?
+4. (Resolved) Players join with a nickname and room code, no password; only the
+   Host signs in.

@@ -12,10 +12,6 @@ import type {
 export type RunStatus = "LOBBY" | "ROUND_OPEN" | "ROUND_LOCKED" | "ROUND_REVEALED" | "FINISHED";
 export type RunPhase = "NORMAL" | "ESCALATION";
 
-export interface AccountSecret extends Account {
-  /** Server-only. Never pass this type to a projection or archive builder. */
-  password: string;
-}
 
 export interface InternalRound extends Round {
   /** Server-only until the round has been revealed. Values are integer tenths. */
@@ -71,7 +67,8 @@ export interface Room {
   code: string;
   version: number;
   teams: Team[];
-  accounts: AccountSecret[];
+  /** Everyone who has joined this room by name, kept across runs so tokens survive RESET. */
+  accounts: Account[];
   run: Run;
   sessions: Record<string, PlayerSession>;
   commandReceipts: Record<string, CommandReceipt>;
@@ -226,23 +223,17 @@ export function teamLeaderboard(room: Pick<Room, "teams" | "run">): TeamLeaderbo
     .map(({ teamId, points: total, rank: position }) => ({ teamId, points: total, rank: position }));
 }
 
-export function createRoom(args: { code: string; teams: Team[]; accounts: AccountSecret[]; now: number }): Room {
-  if (args.teams.length === 0 || args.accounts.length === 0) throw new RoomError("INVALID_ROSTER", "Roster must contain at least one team and one account.");
-  const teamIds = new Set(args.teams.map((team) => team.id));
-  const usernames = new Set<string>();
-  for (const account of args.accounts) {
-    if (!teamIds.has(account.teamId)) throw new RoomError("INVALID_ROSTER", `Unknown team for ${account.username}.`);
-    const canonical = account.username.trim().toLowerCase();
-    if (usernames.has(canonical)) throw new RoomError("INVALID_ROSTER", "Usernames must be unique regardless of case.");
-    usernames.add(canonical);
-  }
+export function createRoom(args: { code: string; teams: Team[]; now: number }): Room {
+  if (args.teams.length === 0) throw new RoomError("INVALID_ROSTER", "Roster must contain at least one team.");
+  const teamIds = new Set(args.teams.map((team) => team.id.toLowerCase()));
+  if (teamIds.size !== args.teams.length) throw new RoomError("INVALID_ROSTER", "Team IDs must be unique regardless of case.");
   const timestamp = iso(args.now);
   return {
     schemaVersion: 1,
     code: args.code,
     version: 0,
     teams: clone(args.teams),
-    accounts: args.accounts.map((account) => ({ ...account, username: account.username.trim().toLowerCase() })),
+    accounts: [],
     run: newRun(1, args.now),
     sessions: {},
     commandReceipts: {},
@@ -314,6 +305,43 @@ export function joinRun(room: Room, username: string, runId: string, now: number
     totalPoints: 0,
   };
   return { room: next, joined: true };
+}
+
+export const MAX_PLAYER_NAME_LENGTH = 20;
+export const MAX_ROOM_ACCOUNTS = 200;
+
+/** Names are rendered as plain text; this only removes markup and normalizes spacing. */
+export function normalizePlayerName(raw: string): string {
+  return raw.replace(/<[^>]*>/g, "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Seeded team with the fewest accounts; ties go to the earlier team. */
+function leastFilledTeam(room: Room): Team {
+  const counts = new Map(room.teams.map((team) => [team.id, 0]));
+  for (const account of room.accounts) counts.set(account.teamId, (counts.get(account.teamId) ?? 0) + 1);
+  return room.teams.reduce((best, team) => counts.get(team.id)! < counts.get(best.id)! ? team : best);
+}
+
+/**
+ * Kahoot-style entry: players type a nickname and the room code, nothing else;
+ * the Host is the only signed-in role. Teams are assigned automatically. A name
+ * is claimed for the whole room (all runs), so a stored token keeps working
+ * after RESET and nobody can take over a participant by reusing their name.
+ */
+export function registerPlayer(room: Room, args: { name: string; now: number }): { room: Room; account: Account } {
+  if (room.run.status !== "LOBBY" || room.run.participationLocked) throw new RoomError("INVALID_TRANSITION", "This game has already started.");
+  const displayName = normalizePlayerName(args.name);
+  if (displayName.length === 0 || displayName.length > MAX_PLAYER_NAME_LENGTH) {
+    throw new RoomError("VALIDATION_ERROR", `Name must be 1 to ${MAX_PLAYER_NAME_LENGTH} characters.`);
+  }
+  const team = leastFilledTeam(room);
+  const username = displayName.toLowerCase();
+  if (room.accounts.some((account) => account.username === username)) throw new RoomError("NAME_TAKEN", "That name is already taken in this game.");
+  if (room.accounts.length >= MAX_ROOM_ACCOUNTS) throw new RoomError("ROOM_FULL", "This game is full.");
+  const account: Account = { username, displayName, teamId: team.id };
+  const next = clone(room);
+  next.accounts.push(account);
+  return { room: joinRun(next, username, next.run.id, args.now).room, account };
 }
 
 function ensureVersion(room: Room, command: HostCommand): CommandResult | null {

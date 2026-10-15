@@ -1,7 +1,7 @@
 import { LibsqlStore } from "./libsql";
 import type { RoomStore } from "./room-types";
 
-export type { RoomStore, SeedRoster } from "./room-types";
+export type { RoomStore } from "./room-types";
 
 const globalForStore = globalThis as unknown as { __store?: LibsqlStore };
 

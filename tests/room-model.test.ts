@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stateResponseSchema, type HostCommand } from "@/contracts";
-import { applyCommand, createRoom, project, publicArchive, submitPick, type Room } from "@/lib/room";
+import { applyCommand, createRoom, project, publicArchive, registerPlayer, submitPick, type Room } from "@/lib/room";
 
 const NOW = 1_700_000_000_000;
 
@@ -8,28 +8,13 @@ function room(): Room {
   return createRoom({
     code: "TEST",
     teams: [{ id: "red", name: "Red" }, { id: "blue", name: "Blue" }],
-    accounts: [
-      { username: "ada", password: "one", displayName: "Ada", teamId: "red" },
-      { username: "bea", password: "two", displayName: "Bea", teamId: "blue" },
-      { username: "cy", password: "three", displayName: "Cy", teamId: "blue" },
-    ],
     now: NOW,
   });
 }
 
 function joinAll(input: Room): Room {
-  const next = structuredClone(input);
-  for (const [username, account] of Object.entries({ ada: next.accounts[0], bea: next.accounts[1], cy: next.accounts[2] })) {
-    next.run.participants[username] = {
-      username,
-      displayName: account.displayName,
-      teamId: account.teamId,
-      joinedAt: new Date(NOW).toISOString(),
-      status: "ACTIVE",
-      eliminatedInRound: null,
-      totalPoints: 0,
-    };
-  }
+  let next = input;
+  for (const name of ["Ada", "Bea", "Cy"]) next = registerPlayer(next, { name, now: NOW }).room;
   return next;
 }
 
@@ -175,5 +160,26 @@ describe("room model", () => {
     const first = applyCommand(game, reset, NOW, "seed");
     expect(Object.keys(first.room.commandReceipts)).toEqual([reset.commandId]);
     expect(applyCommand(first.room, reset, NOW + 1, "seed").room).toBe(first.room);
+  });
+
+  it("registers players by nickname alone and balances them across teams", () => {
+    const game = joinAll(room());
+    expect(game.accounts).toEqual([
+      { username: "ada", displayName: "Ada", teamId: "red" },
+      { username: "bea", displayName: "Bea", teamId: "blue" },
+      { username: "cy", displayName: "Cy", teamId: "red" },
+    ]);
+    expect(Object.keys(game.run.participants)).toEqual(["ada", "bea", "cy"]);
+  });
+
+  it("normalizes nicknames and rejects duplicates, blanks, and late joins", () => {
+    const game = joinAll(room());
+    const code = (fn: () => unknown) => { try { fn(); return null; } catch (error) { return (error as { code?: string }).code; } };
+    expect(registerPlayer(game, { name: "  <b>Dee</b>   Dee ", now: NOW }).account).toEqual({ username: "dee dee", displayName: "Dee Dee", teamId: "blue" });
+    expect(code(() => registerPlayer(game, { name: "ADA", now: NOW }))).toBe("NAME_TAKEN");
+    expect(code(() => registerPlayer(game, { name: "   ", now: NOW }))).toBe("VALIDATION_ERROR");
+    expect(code(() => registerPlayer(game, { name: "x".repeat(21), now: NOW }))).toBe("VALIDATION_ERROR");
+    const started = command(game, "OPEN_ROUND").room;
+    expect(code(() => registerPlayer(started, { name: "Eve", now: NOW }))).toBe("INVALID_TRANSITION");
   });
 });

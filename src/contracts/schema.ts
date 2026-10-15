@@ -146,10 +146,10 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
   }).strict(),
 ]);
 
-export const playerLoginSchema = z.object({
+/** Players join by name; the server normalizes it and enforces the final length. */
+export const playerJoinByNameSchema = z.object({
   code: roomCodeSchema,
-  username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(512),
+  name: z.string().min(1).max(200),
 }).strict();
 
 export const joinSchema = z.object({ runId: uuidSchema }).strict();
