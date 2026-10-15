@@ -10,7 +10,7 @@ function finalPlacement(room: Room, username: string): number | null {
   const participant = room.run.participants[username];
   if (!participant || room.run.status !== "FINISHED") return null;
   const active = Object.values(room.run.participants).filter((other) => other.status === "ACTIVE");
-  if (room.run.phase === "ESCALATION" && active.length === 1) {
+  if (active.length === 1) {
     if (participant.status === "ACTIVE") return 1;
     if (participant.eliminatedInRound === null) return null;
     return Object.values(room.run.participants).filter((other) => (other.eliminatedInRound ?? -1) > participant.eliminatedInRound!).length + 2;
@@ -57,6 +57,7 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       picks: Object.values(candidate.picks).map((valueTenths) => ({ valueTenths })),
       winners: candidate.result!.winners.map((winner) => ({ username: winner, valueTenths: candidate.picks[winner], points: candidate.result!.pointsByUsername[winner] ?? 0 })),
       eliminatedUsername: candidate.result!.eliminatedUsername,
+      pointEliminatedUsernames: candidate.result!.pointEliminatedUsernames ?? [],
       pointsByUsername: candidate.result!.pointsByUsername,
     })),
     individualLeaderboard: individualLeaderboard(room.run),

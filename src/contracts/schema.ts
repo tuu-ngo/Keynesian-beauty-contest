@@ -42,6 +42,8 @@ export const roundSettingsSchema = z.object({
   winPoints: z.number().int().min(0).max(1000).default(10),
   losePoints: z.number().int().min(0).max(1000).default(0),
   maxPoints: z.number().int().min(1).max(100000).nullable().default(null),
+  /** Points every player starts the run with; a player whose total reaches 0 is eliminated. 0 turns this off. */
+  startPoints: z.number().int().min(0).max(100000).default(100),
 }).strict();
 
 export const timerOptionSchema = z.union([z.literal(60), z.literal(90), z.literal(120)]).nullable();
@@ -53,6 +55,8 @@ export const roundResultSchema = z.object({
   eliminatedUsername: z.string().nullable(),
   eliminationSeed: z.string().nullable(),
   eliminationCandidates: z.array(z.string()),
+  /** Players eliminated this round because their points reached 0. */
+  pointEliminatedUsernames: z.array(z.string()).default([]),
   /** Signed points actually applied this round (after the max-points cap and the zero floor). */
   pointsByUsername: z.record(z.number().int()),
 }).strict();
@@ -87,6 +91,7 @@ export const revealedRoundSchema = z.object({
   winners: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), points: z.number().int().nonnegative() }).strict()),
   eliminatedUsername: z.string().nullable(),
   pointsByUsername: z.record(z.number().int()).default({}),
+  pointEliminatedUsernames: z.array(z.string()).default([]),
 }).strict();
 
 export const leaderboardRowSchema = z.object({
@@ -157,6 +162,7 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),
       maxPoints: z.number().int().min(1).max(100000).nullable().optional(),
+      startPoints: z.number().int().min(0).max(100000).optional(),
     }).strict(),
   }).strict(),
 ]);

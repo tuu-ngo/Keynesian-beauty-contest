@@ -67,6 +67,7 @@ describe("room model", () => {
   it("scores exact fractional targets, records command receipts, and only reveals after lock", () => {
     let game = joinAll(room());
     game.run.settingsForNextRound.p = "2/3";
+    game.run.settingsForNextRound.startPoints = 0;
     const opened = command(game, "OPEN_ROUND");
     game = opened.room;
     game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, requestId: crypto.randomUUID(), now: NOW }).room;
@@ -197,7 +198,7 @@ describe("room model", () => {
 
     it("awards win points, deducts loss points and never drops below zero", () => {
       // avg 20, target 16 -> Ada (15) wins; Bea and Cy lose.
-      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 7, losePoints: 3 });
+      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 7, losePoints: 3, startPoints: 0 });
       expect(game.run.participants.ada.totalPoints).toBe(7);
       expect(game.run.participants.bea.totalPoints).toBe(0);
       expect(game.run.rounds[0].result!.pointsByUsername).toEqual({ ada: 7 });
@@ -208,7 +209,7 @@ describe("room model", () => {
     });
 
     it("caps a player's total at maxPoints", () => {
-      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 10, maxPoints: 15 });
+      let game = playRound(joinAll(room()), { ada: 15, bea: 20, cy: 25 }, { winPoints: 10, maxPoints: 15, startPoints: 0 });
       game = playRound(game, { ada: 15, bea: 20, cy: 25 });
       expect(game.run.participants.ada.totalPoints).toBe(15);
       expect(game.run.rounds[1].result!.pointsByUsername.ada).toBe(5);
@@ -228,5 +229,56 @@ describe("room model", () => {
     for (const bad of [12.5, 0.1, -1, 101]) expect(pick(bad)).toThrow();
     expect(pick(0)().result.pick).toBe(0);
     expect(pick(100)().result.pick).toBe(1000);
+  });
+  describe("elimination by points", () => {
+    function playRound(input: Room, picks: Record<string, number>, payload?: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"]): Room {
+      let game = input;
+      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW, "s").room;
+      game = command(game, "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries(picks)) {
+        game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      return command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    }
+    // avg 20, target 16: Ada (15) wins, Bea and Cy lose.
+    const picks = { ada: 15, bea: 20, cy: 25 };
+
+    it("gives everyone the starting points in the lobby", () => {
+      const joined = joinAll(room());
+      const game = applyCommand(joined, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { startPoints: 30 } }, NOW, "s").room;
+      expect(Object.values(game.run.participants).map((p) => p.totalPoints)).toEqual([30, 30, 30]);
+    });
+
+    it("eliminates a player whose points reach 0 and keeps the game going", () => {
+      let game = playRound(joinAll(room()), picks, { startPoints: 20, losePoints: 10, winPoints: 10 });
+      expect(game.run.status).toBe("ROUND_REVEALED");
+      expect(game.run.participants.bea.totalPoints).toBe(10);
+      game = playRound(game, { ada: 15, bea: 20, cy: 25, });
+      // Ada wins again; Bea and Cy hit 0 together, so both are out and Ada is last.
+      expect(game.run.participants.bea.status).toBe("ELIMINATED");
+      expect(game.run.participants.cy.status).toBe("ELIMINATED");
+      expect(game.run.rounds[1].result!.pointEliminatedUsernames.sort()).toEqual(["bea", "cy"]);
+      expect(game.run.status).toBe("FINISHED");
+      const state = project(game, "public", NOW);
+      expect(state.players.find((p) => p.username === "ada")!.finalPlacement).toBe(1);
+    });
+
+    it("eliminates only the player who reached 0", () => {
+      let game = playRound(joinAll(room()), picks, { startPoints: 20, losePoints: 10, winPoints: 10 });
+      // Round 2: avg 29.3, target 23.5 -> Bea (18) wins; Ada drops 30 -> 20, Cy drops 10 -> 0.
+      game = playRound(game, { ada: 40, bea: 18, cy: 30 });
+      expect(game.run.rounds[1].result!.pointEliminatedUsernames).toEqual(["cy"]);
+      expect(game.run.participants.cy.status).toBe("ELIMINATED");
+      expect(game.run.participants.ada.status).toBe("ACTIVE");
+      expect(game.run.participants.ada.totalPoints).toBe(20);
+      expect(game.run.status).toBe("ROUND_REVEALED");
+    });
+
+    it("is off when starting points are 0", () => {
+      let game = playRound(joinAll(room()), picks, { startPoints: 0, losePoints: 10 });
+      game = playRound(game, picks);
+      expect(game.run.participants.bea.totalPoints).toBe(0);
+      expect(game.run.participants.bea.status).toBe("ACTIVE");
+    });
   });
 });

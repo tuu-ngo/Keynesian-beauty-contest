@@ -136,6 +136,7 @@ export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
   winPoints: 10,
   losePoints: 0,
   maxPoints: null,
+  startPoints: 100,
 };
 
 export class RoomError extends Error {
@@ -159,6 +160,13 @@ function currentRound(run: Run): InternalRound | null {
 
 function activeParticipants(run: Run): Participant[] {
   return Object.values(run.participants).filter((participant) => participant.status === "ACTIVE");
+}
+
+/** Before round 1 everyone sits at the configured starting points, so the lobby leaderboard already shows them. */
+function syncStartPoints(run: Run): void {
+  if (run.rounds.length > 0) return;
+  const start = run.settingsForNextRound.startPoints ?? 0;
+  for (const participant of Object.values(run.participants)) participant.totalPoints = start;
 }
 
 function activeUsernames(run: Run): string[] {
@@ -307,6 +315,7 @@ export function joinRun(room: Room, username: string, runId: string, now: number
     eliminatedInRound: null,
     totalPoints: 0,
   };
+  syncStartPoints(next.run);
   return { room: next, joined: true };
 }
 
@@ -358,7 +367,7 @@ function score(round: InternalRound, run: Run): RoundResult {
   const entries = Object.entries(round.picks).filter(([username]) => run.participants[username]?.status === "ACTIVE");
   if (entries.length === 0) {
     round.disqualifiedUsernames = [];
-    return { average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null, eliminationCandidates: [], pointsByUsername: {} };
+    return { average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null, eliminationCandidates: [], pointEliminatedUsernames: [], pointsByUsername: {} };
   }
   const sum = entries.reduce((total, [, value]) => total + value, 0);
   const numberOfPicks = BigInt(entries.length);
@@ -414,6 +423,7 @@ function score(round: InternalRound, run: Run): RoundResult {
     eliminatedUsername: null,
     eliminationSeed: null,
     eliminationCandidates: [],
+    pointEliminatedUsernames: [],
     pointsByUsername,
   };
 }
@@ -497,6 +507,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
       if (activeParticipants(run).length < 2) throw new RoomError("INVALID_TRANSITION", "At least two participants are required.");
       run.participationLocked = true;
+      syncStartPoints(run);
       // Pick receipts only make retries of the open round idempotent. Dropping
       // earlier rounds' receipts keeps the persisted snapshot from growing all game.
       next.pickReceipts = {};
@@ -529,14 +540,22 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       } else {
         eliminate(next, round, seed);
         if (round.result.eliminatedUsername && !run.activeRules.includes(2)) run.activeRules.push(2);
-        round.revealedAt = iso(now);
-        if (activeParticipants(run).length <= 1) {
-          run.status = "FINISHED";
-          run.finishedAt = iso(now);
-          archive(next, "FINISH", now);
+      }
+      round.revealedAt = iso(now);
+      // Points elimination runs in both phases: anyone whose total hit 0 is out (rooms saved before this setting have it off).
+      if ((round.settings.startPoints ?? 0) > 0) {
+        for (const participant of activeParticipants(run)) {
+          if (participant.totalPoints > 0) continue;
+          participant.status = "ELIMINATED";
+          participant.eliminatedInRound = round.number;
+          round.result.pointEliminatedUsernames.push(participant.username);
         }
       }
-      round.revealedAt ??= iso(now);
+      if (activeParticipants(run).length <= 1) {
+        run.status = "FINISHED";
+        run.finishedAt = iso(now);
+        archive(next, "FINISH", now);
+      }
       if (run.status !== "FINISHED") run.status = "ROUND_REVEALED";
       changed = true;
       break;
@@ -552,6 +571,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
     case "UPDATE_SETTINGS": {
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
       run.settingsForNextRound = { ...run.settingsForNextRound, ...command.payload };
+      syncStartPoints(run);
       changed = true;
       break;
     }
