@@ -104,7 +104,7 @@ function TrendChart({ rounds }: { rounds: RevealedRound[] }) {
 }
 
 function EscalationNotice({ game, result }: { game: PublicProjection; result: RevealedRound }) {
-  return <div className="escalation-notice">{result.eliminatedUsername && <p>{game.players.find((player) => player.username === result.eliminatedUsername)?.displayName ?? result.eliminatedUsername} was eliminated.</p>}{game.escalationReason === "NASH" && <p>Nash equilibrium reached. Rule 1 begins next round.</p>}{game.escalationReason === "HOST" && <p>Escalation started by host. Rule 1 begins next round.</p>}</div>;
+  return <div className="escalation-notice">{result.eliminatedUsername && <p>{game.players.find((player) => player.username === result.eliminatedUsername)?.displayName ?? result.eliminatedUsername} was eliminated.</p>}{game.escalationReason === "NASH" && <p>Nash equilibrium reached. From the next round, duplicate picks lose (Rule 1) and a lone 100 beats 0 (Rule 2).</p>}{game.escalationReason === "HOST" && <p>Escalation started by host. From the next round, duplicate picks lose (Rule 1) and a lone 100 beats 0 (Rule 2).</p>}</div>;
 }
 
 function Leaderboard({ game }: { game: PublicProjection }) {

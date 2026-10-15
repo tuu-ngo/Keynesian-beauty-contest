@@ -199,8 +199,8 @@ function PlayerResult({ game }: { game: PlayerProjection }) {
     <p>{result.winners.length ? `Winner${result.winners.length === 1 ? "" : "s"}: ${result.winners.map((winner) => winner.username).join(", ")}.` : "No eligible winner this round."}</p>
     {result.pointEliminatedUsernames.includes(game.self.username) && <p className="notice notice--danger">You ran out of points and are out of the game. You can keep following as a spectator.</p>}
     {result.eliminatedUsername && <p className="notice notice--danger">{result.eliminatedUsername} was eliminated. {game.self.status === "ELIMINATED" ? "You can keep following as a spectator." : ""}</p>}
-    {game.escalationReason === "NASH" && <p className="notice">The group reached Nash equilibrium. Escalation rules apply next round.</p>}
-    {game.escalationReason === "HOST" && <p className="notice">The host started escalation. Escalation rules apply next round.</p>}
+    {game.escalationReason === "NASH" && <p className="notice">The group reached Nash equilibrium. From the next round, duplicate picks lose the round (Rule 1) and a lone 100 beats 0 (Rule 2).</p>}
+    {game.escalationReason === "HOST" && <p className="notice">The host started escalation. From the next round, duplicate picks lose the round (Rule 1) and a lone 100 beats 0 (Rule 2).</p>}
     {game.status === "FINISHED" && <p className="notice">{self?.finalPlacement ? `Your final placement: ${self.finalPlacement}.` : "Final scores are shown on the Portal."}</p>}
   </section>;
 }

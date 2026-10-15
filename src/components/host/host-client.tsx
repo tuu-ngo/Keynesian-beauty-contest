@@ -116,6 +116,10 @@ function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy:
   const [winPoints, setWinPoints] = useState(String(saved.winPoints ?? 10));
   const [losePoints, setLosePoints] = useState(String(saved.losePoints ?? 0));
   const [startPoints, setStartPoints] = useState(String(saved.startPoints ?? 0));
+  const [ruleOne, setRuleOne] = useState(game.activeRules.includes(1));
+  const [ruleTwo, setRuleTwo] = useState(game.activeRules.includes(2));
+  const savedRules = game.activeRules.join(",");
+  useEffect(() => { setRuleOne(savedRules.split(",").includes("1")); setRuleTwo(savedRules.split(",").includes("2")); }, [savedRules]);
   useEffect(() => {
     setRoundMode(saved.roundMode ?? "STANDARD"); setHostTarget(String(game.nextHostTarget ?? 50)); setP(saved.p); setTimer(timerText(saved.timerSeconds));
     setWinPoints(String(saved.winPoints ?? 10)); setLosePoints(String(saved.losePoints ?? 0)); setStartPoints(String(saved.startPoints ?? 0));
@@ -123,12 +127,17 @@ function NextRoundSettings({ game, busy, onSave }: { game: HostProjection; busy:
   function submit(event: FormEvent) {
     event.preventDefault();
     const seconds = timer === "off" ? null : (Number(timer) as 60 | 90 | 120);
-    void onSave({ roundMode, ...(roundMode === "HOST_TARGET" ? { hostTarget: Number(hostTarget) } : {}), p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), startPoints: Number(startPoints) });
+    void onSave({ roundMode, ...(roundMode === "HOST_TARGET" ? { hostTarget: Number(hostTarget) } : {}), p, timerSeconds: seconds, winPoints: Number(winPoints), losePoints: Number(losePoints), startPoints: Number(startPoints), activeRules: [...(ruleOne ? [1 as const] : []), ...(ruleTwo ? [2 as const] : [])] });
   }
   return <form className="next-settings" onSubmit={submit}><h2>Next round</h2><label><span>Round type</span><select value={roundMode} onChange={(event) => setRoundMode(event.target.value as typeof roundMode)}><option value="STANDARD">Standard round</option><option value="WAGER">Wager round</option><option value="HOST_TARGET" disabled={game.phase === "ESCALATION"}>Host target round</option></select></label>{roundMode === "HOST_TARGET" ? <label><span>Secret Host target</span><input type="number" inputMode="numeric" min={0} max={100} step={1} required value={hostTarget} onChange={(event) => setHostTarget(event.target.value)} /><small>Whole number from 0 to 100. Players will see it only after reveal.</small></label> : <label><span>Target multiplier</span><select value={p} onChange={(event) => setP(event.target.value as typeof p)}><option value="0.8">80% of average</option><option value="2/3">2/3 of average</option><option value="1/2">1/2 of average</option></select></label>}<label><span>Timer</span><select value={timer} onChange={(event) => setTimer(event.target.value)}><option value="60">60 seconds</option><option value="90">90 seconds</option><option value="120">120 seconds</option><option value="off">Off</option></select></label>
     <label><span>Starting points (0 = no elimination by points)</span><input type="number" inputMode="numeric" min={0} max={100000} step={1} required value={startPoints} onChange={(event) => setStartPoints(event.target.value)} disabled={game.status !== "LOBBY"} /></label>
     <label><span>Points per win</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={winPoints} onChange={(event) => setWinPoints(event.target.value)} /></label>
     <label><span>Points lost per loss</span><input type="number" inputMode="numeric" min={0} max={1000} step={1} required value={losePoints} onChange={(event) => setLosePoints(event.target.value)} /></label>
+    <fieldset className="rule-toggles"><legend>Rules in force</legend>
+      <label className="rule-toggle"><input type="checkbox" checked={ruleOne} onChange={(event) => setRuleOne(event.target.checked)} /><span><strong>Rule 1</strong> Duplicate picks lose the round.</span></label>
+      <label className="rule-toggle"><input type="checkbox" checked={ruleTwo} onChange={(event) => setRuleTwo(event.target.checked)} /><span><strong>Rule 2</strong> If someone picks 0, a lone 100 wins.</span></label>
+      <small>Applies from the next round. Escalation turns both on.</small>
+    </fieldset>
     <p>{roundMode === "HOST_TARGET" ? "The player closest to your secret target wins. This round type is available only during normal play." : roundMode === "WAGER" ? "A winning stake returns double; a losing stake is forfeited." : "The player closest to the configured fraction of the average wins."} Basic win/loss points still apply.</p><button className="button button--secondary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button></form>;
 }
 

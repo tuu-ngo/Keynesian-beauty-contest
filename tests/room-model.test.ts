@@ -20,8 +20,12 @@ function joinAll(input: Room): Room {
 
 function command(input: Room, type: HostCommand["type"], version = input.version): { room: Room; response: ReturnType<typeof applyCommand> } {
   const base = { type, commandId: crypto.randomUUID(), expectedVersion: version } as HostCommand;
-  const response = applyCommand(input, base, NOW, "test-seed");
+  const response = applyCommand(input, base, NOW);
   return { room: response.room, response };
+}
+
+function settings(input: Room, payload: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"]): Room {
+  return applyCommand(input, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: input.version, payload }, NOW).room;
 }
 
 describe("room model", () => {
@@ -29,8 +33,8 @@ describe("room model", () => {
     const game = joinAll(room());
     const commandId = crypto.randomUUID();
     const command: HostCommand = { type: "OPEN_ROUND", commandId, expectedVersion: game.version };
-    const first = applyCommand(game, command, NOW, "first-seed");
-    const replay = applyCommand(first.room, { ...command, expectedVersion: 999 }, NOW + 1, "different-seed");
+    const first = applyCommand(game, command, NOW);
+    const replay = applyCommand(first.room, { ...command, expectedVersion: 999 }, NOW + 1);
 
     expect(first.room.run.rounds).toHaveLength(1);
     expect(replay.room).toBe(first.room);
@@ -86,7 +90,7 @@ describe("room model", () => {
     expect(hostState.hostPicks).toEqual(expect.arrayContaining([{ username: "bea", valueTenths: 200, stakePoints: 0 }]));
 
     // A distinct id must not re-score an already revealed round.
-    expect(() => applyCommand(game, { type: "REVEAL_ROUND", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW, "different")).toThrow("INVALID_TRANSITION");
+    expect(() => applyCommand(game, { type: "REVEAL_ROUND", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW)).toThrow("INVALID_TRANSITION");
   });
 
   it("moves from a Nash result into escalation, archives on reset, and issues a new run id", () => {
@@ -102,13 +106,14 @@ describe("room model", () => {
 
     expect(game.run.phase).toBe("ESCALATION");
     expect(game.run.escalationReason).toBe("NASH");
-    expect(game.run.activeRules).toEqual([1]);
+    expect(game.run.activeRules).toEqual([1, 2]);
 
     game = command(game, "RESET").room;
     expect(game.run.id).not.toBe(originalRun);
     expect(game.run.status).toBe("LOBBY");
     expect(game.run.participants).toEqual({});
     expect(game.archives).toHaveLength(1);
+    // Rule 1 only starts after Nash, so the all-zero Nash round itself is a three-way win.
     expect(game.archives[0].archive.run.rounds[0].result?.winners).toEqual(["ada", "bea", "cy"]);
 
     const resetPlayerView = project(game, "player", NOW, "ada");
@@ -145,7 +150,7 @@ describe("room model", () => {
     }
     game = command(game, "LOCK_ROUND").room;
     game = command(game, "REVEAL_ROUND").room;
-    expect(game.run).toMatchObject({ phase: "ESCALATION", escalationReason: "NASH", activeRules: [1] });
+    expect(game.run).toMatchObject({ phase: "ESCALATION", escalationReason: "NASH", activeRules: [1, 2] });
 
     game = command(game, "CANCEL_ROUND_RESULT").room;
     expect(game.run).toMatchObject({ status: "ROUND_LOCKED", phase: "NORMAL", escalationReason: null, activeRules: [] });
@@ -165,13 +170,14 @@ describe("room model", () => {
       game = submitPick(game, { username, runId: game.run.id, round: 2, value, requestId: crypto.randomUUID(), now: NOW }).room;
     }
     game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
-    const eliminated = game.run.rounds[1].result?.eliminatedUsername;
-    expect(eliminated).not.toBeNull();
-    expect(game.run.activeRules).toEqual([1, 2]);
+    // Rule 2: a lone 100 beats the 0. Nobody is knocked out.
+    expect(game.run.rounds[1].result?.winners).toEqual(["bea"]);
+    expect(game.run.rounds[1].result?.eliminatedUsername).toBeNull();
+    expect(game.run.participants.bea.totalPoints).toBe(20);
 
     game = command(game, "CANCEL_ROUND_RESULT").room;
-    expect(game.run).toMatchObject({ status: "ROUND_LOCKED", phase: "ESCALATION", escalationReason: "HOST", activeRules: [1] });
-    expect(game.run.participants[eliminated!]).toMatchObject({ status: "ACTIVE", eliminatedInRound: null });
+    expect(game.run).toMatchObject({ status: "ROUND_LOCKED", phase: "ESCALATION", escalationReason: "HOST", activeRules: [1, 2] });
+    expect(game.run.participants.bea.totalPoints).toBe(10);
   });
 
   it("does not offer cancellation after the host starts escalation from a revealed result", () => {
@@ -219,7 +225,7 @@ describe("room model", () => {
 
   it("publishes the saved next-round settings before the round opens", () => {
     let game = joinAll(room());
-    game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { p: "2/3", timerSeconds: null } }, NOW, "seed").room;
+    game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { p: "2/3", timerSeconds: null } }, NOW).room;
     const lobby = project(game, "public", NOW);
     expect(stateResponseSchema.safeParse(lobby).success).toBe(true);
     expect(lobby.currentRound).toBeNull();
@@ -240,16 +246,16 @@ describe("room model", () => {
     game = command(game, "OPEN_ROUND").room;
     const deadline = game.run.rounds[0].deadlineAt;
 
-    game = applyCommand(game, { type: "PAUSE_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 10_000, "seed").room;
+    game = applyCommand(game, { type: "PAUSE_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 10_000).room;
     expect(game.run.rounds[0]).toMatchObject({ timerPaused: true, pausedRemainingMs: 50_000, deadlineAt: deadline });
     expect(resolveDeadline(game, NOW + 120_000).run.status).toBe("ROUND_OPEN");
     const paused = project(game, "host", NOW + 120_000);
     expect(paused.currentRound).toMatchObject({ timerPaused: true, pausedRemainingMs: 50_000 });
 
-    game = applyCommand(game, { type: "RESUME_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 120_000, "seed").room;
+    game = applyCommand(game, { type: "RESUME_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 120_000).room;
     expect(game.run.rounds[0]).toMatchObject({ timerPaused: false, pausedRemainingMs: null, deadlineAt: new Date(NOW + 170_000).toISOString() });
 
-    game = applyCommand(game, { type: "RESET_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 130_000, "seed").room;
+    game = applyCommand(game, { type: "RESET_TIMER", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW + 130_000).room;
     expect(game.run.rounds[0]).toMatchObject({ timerPaused: false, pausedRemainingMs: null, deadlineAt: new Date(NOW + 190_000).toISOString() });
   });
 
@@ -265,9 +271,9 @@ describe("room model", () => {
     expect(game.pickReceipts).toEqual({});
 
     const reset: HostCommand = { type: "RESET", commandId: crypto.randomUUID(), expectedVersion: game.version };
-    const first = applyCommand(game, reset, NOW, "seed");
+    const first = applyCommand(game, reset, NOW);
     expect(Object.keys(first.room.commandReceipts)).toEqual([reset.commandId]);
-    expect(applyCommand(first.room, reset, NOW + 1, "seed").room).toBe(first.room);
+    expect(applyCommand(first.room, reset, NOW + 1).room).toBe(first.room);
   });
 
   it("registers players by nickname alone and balances them across teams", () => {
@@ -294,7 +300,7 @@ describe("room model", () => {
   describe("configurable points", () => {
     function playRound(input: Room, picks: Record<string, number>, payload?: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"]): Room {
       let game = input;
-      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW, "s").room;
+      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       for (const [username, value] of Object.entries(picks)) {
         game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, value, requestId: crypto.randomUUID(), now: NOW }).room;
@@ -323,13 +329,15 @@ describe("room model", () => {
     });
   });
   describe("wager rounds", () => {
+    // Ada (30) and Bea (50) tie at distance 10 from the target of 40 without
+    // picking the same number, which Rule 1 would turn into a loss.
     function wagerRound(input: Room, submissions: Record<string, { value: number; stake: number }>, payload: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"] = {}): Room {
       let game = applyCommand(input, {
         type: "UPDATE_SETTINGS",
         commandId: crypto.randomUUID(),
         expectedVersion: input.version,
         payload: { roundMode: "WAGER", ...payload },
-      }, NOW, "s").room;
+      }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       for (const [username, submission] of Object.entries(submissions)) {
         game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, ...submission, requestId: crypto.randomUUID(), now: NOW }).room;
@@ -339,8 +347,8 @@ describe("room model", () => {
 
     it("doubles each winner's stake, forfeits losing stakes, then applies basic scoring", () => {
       const game = wagerRound(joinAll(room()), {
-        ada: { value: 10, stake: 10 },
-        bea: { value: 10, stake: 20 },
+        ada: { value: 30, stake: 10 },
+        bea: { value: 50, stake: 20 },
         cy: { value: 70, stake: 10 },
       }, { startPoints: 100, winPoints: 10, losePoints: 5 });
       const result = game.run.rounds[0].result!;
@@ -356,8 +364,8 @@ describe("room model", () => {
 
     it("pays every tied winner at the same fixed two-times odds", () => {
       const game = wagerRound(joinAll(room()), {
-        ada: { value: 10, stake: 1 },
-        bea: { value: 10, stake: 1 },
+        ada: { value: 30, stake: 1 },
+        bea: { value: 50, stake: 1 },
         cy: { value: 70, stake: 1 },
       }, { winPoints: 0, losePoints: 0 });
       expect(game.run.rounds[0].result?.payoutsByUsername).toEqual({ ada: 2, bea: 2 });
@@ -366,8 +374,8 @@ describe("room model", () => {
 
     it("does not refund a loser's stake when the winners staked zero", () => {
       const game = wagerRound(joinAll(room()), {
-        ada: { value: 10, stake: 0 },
-        bea: { value: 10, stake: 0 },
+        ada: { value: 30, stake: 0 },
+        bea: { value: 50, stake: 0 },
         cy: { value: 70, stake: 30 },
       }, { winPoints: 0, losePoints: 0 });
       const result = game.run.rounds[0].result!;
@@ -376,7 +384,7 @@ describe("room model", () => {
     });
 
     it("keeps stakes private while open and reveals them after lock/reveal", () => {
-      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER" } }, NOW, "s").room;
+      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER" } }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 25, requestId: crypto.randomUUID(), now: NOW }).room;
 
@@ -400,7 +408,7 @@ describe("room model", () => {
       standard = command(standard, "OPEN_ROUND").room;
       expect(() => submitPick(standard, { username: "ada", runId: standard.run.id, round: 1, value: 10, stake: 1, requestId: crypto.randomUUID(), now: NOW })).toThrow("A stake is only allowed");
 
-      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER", startPoints: 20 } }, NOW, "s").room;
+      let game = applyCommand(joinAll(room()), { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { roundMode: "WAGER", startPoints: 20 } }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       expect(() => submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 21, requestId: crypto.randomUUID(), now: NOW })).toThrow("Stake cannot exceed");
       game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 10, stake: 20, requestId: crypto.randomUUID(), now: NOW }).room;
@@ -425,7 +433,7 @@ describe("room model", () => {
       let game = wagerRound(joinAll(room()), {
         ada: { value: 10, stake: 10 }, bea: { value: 20, stake: 10 }, cy: { value: 30, stake: 10 },
       });
-      game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { roundMode: "STANDARD" } }, NOW, "s").room;
+      game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { roundMode: "STANDARD" } }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       expect(game.run.rounds[0].settings.roundMode).toBe("WAGER");
       expect(game.run.rounds[1].settings.roundMode).toBe("STANDARD");
@@ -467,7 +475,7 @@ describe("room model", () => {
         commandId: crypto.randomUUID(),
         expectedVersion: input.version,
         payload: { roundMode: "HOST_TARGET", hostTarget: target },
-      }, NOW, "s").room;
+      }, NOW).room;
     }
 
     it("keeps the fixed target secret until reveal and awards equally close players", () => {
@@ -509,7 +517,7 @@ describe("room model", () => {
       const joined = joinAll(room());
       expect(() => applyCommand(joined, {
         type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { roundMode: "HOST_TARGET" },
-      }, NOW, "s")).toThrow("Choose a Host target");
+      }, NOW)).toThrow("Choose a Host target");
       expect(hostCommandSchema.safeParse({
         type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { roundMode: "HOST_TARGET", hostTarget: 37.5 },
       }).success).toBe(false);
@@ -522,7 +530,7 @@ describe("room model", () => {
       expect(game.run.nextHostTargetTenths).toBeNull();
       expect(() => applyCommand(game, {
         type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { roundMode: "HOST_TARGET", hostTarget: 20 },
-      }, NOW, "s")).toThrow("only available during normal play");
+      }, NOW)).toThrow("only available during normal play");
     });
 
     it("keeps the snapshotted target when a result is cancelled and revealed again", () => {
@@ -559,7 +567,7 @@ describe("room model", () => {
   describe("elimination by points", () => {
     function playRound(input: Room, picks: Record<string, number>, payload?: Extract<HostCommand, { type: "UPDATE_SETTINGS" }>["payload"]): Room {
       let game = input;
-      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW, "s").room;
+      if (payload) game = applyCommand(game, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload }, NOW).room;
       game = command(game, "OPEN_ROUND").room;
       for (const [username, value] of Object.entries(picks)) {
         game = submitPick(game, { username, runId: game.run.id, round: game.run.rounds.length, value, requestId: crypto.randomUUID(), now: NOW }).room;
@@ -571,7 +579,7 @@ describe("room model", () => {
 
     it("gives everyone the starting points in the lobby", () => {
       const joined = joinAll(room());
-      const game = applyCommand(joined, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { startPoints: 30 } }, NOW, "s").room;
+      const game = applyCommand(joined, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { startPoints: 30 } }, NOW).room;
       expect(Object.values(game.run.participants).map((p) => p.totalPoints)).toEqual([30, 30, 30]);
     });
 
@@ -667,17 +675,17 @@ describe("room model", () => {
       expect(game.run.phase).toBe("NORMAL");
     });
 
-    it("eliminates a non-submitter first in escalation, even when the default is closest", () => {
-      let game = command(escalated(), "OPEN_ROUND").room;
+    it("treats a non-submitter as a loser in escalation without knocking anyone out", () => {
+      let game = command(settings(escalated(), { losePoints: 5 }), "OPEN_ROUND").room;
       game = pick(game, "ada", 90);
       game = pick(game, "bea", 10);
       game = command(game, "LOCK_ROUND").room;
       game = command(game, "REVEAL_ROUND").room;
       const result = game.run.rounds[1].result!;
       expect(result.winners).toEqual(["bea"]);
-      expect(result.eliminationCandidates).toEqual(["cy"]);
-      expect(result.eliminatedUsername).toBe("cy");
-      expect(game.run.participants.ada.status).toBe("ACTIVE");
+      expect(result.pointsByUsername).toEqual({ ada: -5, bea: 10, cy: -5 });
+      expect(result.eliminatedUsername).toBeNull();
+      expect(Object.values(game.run.participants).map((player) => player.status)).toEqual(["ACTIVE", "ACTIVE", "ACTIVE"]);
     });
 
     it("does not make a real pick of 50 a Rule 1 duplicate of a default", () => {
@@ -687,19 +695,94 @@ describe("room model", () => {
       game = command(game, "LOCK_ROUND").room;
       game = command(game, "REVEAL_ROUND").room;
       expect(game.run.rounds[1].disqualifiedUsernames).toEqual([]);
-      expect(game.run.rounds[1].result!.eliminatedUsername).toBe("cy");
+      expect(game.run.rounds[1].result!.winners).toEqual(["bea"]);
+    });
+  });
+
+  describe("Rule 1", () => {
+    function pick(game: Room, username: string, value: number): Room {
+      const round = game.run.rounds.at(-1)!.number;
+      return submitPick(game, { username, runId: game.run.id, round, value, requestId: crypto.randomUUID(), now: NOW }).room;
+    }
+
+    function playRound(input: Room, picks: Record<string, number>): Room {
+      let game = command(input, "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries(picks)) game = pick(game, username, value);
+      return command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    }
+
+    function escalated(input = joinAll(room())): Room {
+      let game = command(input, "OPEN_ROUND").room;
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      return command(game, "START_ESCALATION").room;
+    }
+
+    it("is not active before escalation, so duplicate picks can win a normal round", () => {
+      // Target 29.33: Ada and Bea share the closest pick.
+      const game = playRound(settings(joinAll(room()), { losePoints: 5 }), { ada: 20, bea: 20, cy: 70 });
+      expect(game.run.activeRules).toEqual([]);
+      expect(game.run.rounds[0].disqualifiedUsernames).toEqual([]);
+      expect(game.run.rounds[0].result!.winners).toEqual(["ada", "bea"]);
     });
 
-    it("eliminates one of several non-submitters by the stored seed", () => {
-      let game = command(escalated(), "OPEN_ROUND").room;
-      game = pick(game, "ada", 0);
-      game = command(game, "LOCK_ROUND").room;
-      game = command(game, "REVEAL_ROUND").room;
+    it("makes duplicate picks lose once escalation starts", () => {
+      const game = playRound(escalated(settings(joinAll(room()), { losePoints: 5 })), { ada: 20, bea: 20, cy: 70 });
       const result = game.run.rounds[1].result!;
-      expect(result.winners).toEqual(["ada"]);
-      expect(result.eliminationCandidates).toEqual(["bea", "cy"]);
-      expect(["bea", "cy"]).toContain(result.eliminatedUsername);
-      expect(result.eliminationSeed).toBe("test-seed");
+      expect(game.run.activeRules).toEqual([1, 2]);
+      expect(game.run.rounds[1].disqualifiedUsernames).toEqual(["ada", "bea"]);
+      expect(result.winners).toEqual(["cy"]);
+      expect(result.pointsByUsername).toEqual({ ada: -5, bea: -5, cy: 10 });
+      expect(result.eliminatedUsername).toBeNull();
+    });
+
+    it("only eliminates players whose points run out", () => {
+      const game = playRound(escalated(settings(joinAll(room()), { startPoints: 5, losePoints: 5 })), { ada: 20, bea: 20, cy: 70 });
+      const result = game.run.rounds[1].result!;
+      expect(result.eliminatedUsername).toBeNull();
+      expect(result.pointEliminatedUsernames).toEqual(["ada", "bea"]);
+      expect(game.run.status).toBe("FINISHED");
+      expect(game.run.participants.cy.status).toBe("ACTIVE");
+    });
+
+    it("lets the host tick Rule 1 in normal play and untick it during escalation", () => {
+      let game = settings(joinAll(room()), { activeRules: [1] });
+      expect(game.run.activeRules).toEqual([1]);
+      game = playRound(game, { ada: 20, bea: 20, cy: 70 });
+      expect(game.run.phase).toBe("NORMAL");
+      expect(game.run.rounds[0].result!.winners).toEqual(["cy"]);
+
+      game = command(game, "START_ESCALATION").room;
+      expect(game.run.activeRules).toEqual([1, 2]);
+      game = settings(game, { activeRules: [2] });
+      game = playRound(game, { ada: 20, bea: 20, cy: 70 });
+      expect(game.run.rounds[1].disqualifiedUsernames).toEqual([]);
+      expect(game.run.rounds[1].result!.winners).toEqual(["ada", "bea"]);
+    });
+
+    it("lets the host turn Rule 2 off and normalizes the saved rule list", () => {
+      let game = settings(escalated(), { activeRules: [2, 1, 2] });
+      expect(game.run.activeRules).toEqual([1, 2]);
+      game = settings(game, { activeRules: [1] });
+      // Without Rule 2 the lone 100 no longer beats the 0; 30 is closest to the target of 34.67.
+      game = playRound(game, { ada: 0, bea: 100, cy: 30 });
+      expect(game.run.rounds[1].result!.winners).toEqual(["cy"]);
+      expect(project(game, "public", NOW).activeRules).toEqual([1]);
+    });
+
+    it("rejects rule changes while a round is open", () => {
+      const game = command(joinAll(room()), "OPEN_ROUND").room;
+      expect(() => settings(game, { activeRules: [1] })).toThrow("INVALID_TRANSITION");
+      expect(hostCommandSchema.safeParse({ type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: 0, payload: { activeRules: [3] } }).success).toBe(false);
+    });
+
+    it("leaves an all-duplicate escalation round without a winner or an elimination", () => {
+      const game = playRound(escalated(), { ada: 0, bea: 0, cy: 0 });
+      const result = game.run.rounds[1].result!;
+      expect(result.winners).toEqual([]);
+      expect(result.pointsByUsername).toEqual({});
+      expect(result.eliminatedUsername).toBeNull();
+      expect(game.run.status).toBe("ROUND_REVEALED");
+      expect(Object.values(game.run.participants).every((player) => player.status === "ACTIVE")).toBe(true);
     });
   });
 });

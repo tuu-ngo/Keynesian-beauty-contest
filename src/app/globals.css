@@ -238,6 +238,12 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 .next-settings h2, .roster h2, .host-round-detail h2 { margin: 0; font-size: 22px; }
 .next-settings p { margin: 0; color: var(--nb-muted); font-size: 14px; }
 .next-settings small { color: var(--nb-muted); font-size: 12px; font-weight: 500; }
+.rule-toggles { display: grid; gap: 10px; margin: 0; border: 0; padding: 0; }
+.rule-toggles legend { margin-bottom: 8px; padding: 0; font-size: 15px; font-weight: 700; }
+.next-settings .rule-toggle { display: flex; align-items: flex-start; gap: 12px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-surface); padding: 12px 14px; box-shadow: var(--nb-shadow-sm); font-weight: 500; cursor: pointer; }
+.next-settings .rule-toggle:has(input:checked) { background: var(--nb-yellow); color: #000; }
+.next-settings .rule-toggle input { flex: none; width: 22px; min-height: 0; height: 22px; margin: 1px 0 0; padding: 0; box-shadow: none; }
+.rule-toggle strong { display: block; font-weight: 800; }
 .host-live { display: grid; align-content: start; gap: 22px; }
 .host-live > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-lavender); padding: 24px; box-shadow: var(--nb-shadow); }
 .host-live > header h2 { margin: 0; font-size: 44px; line-height: 1; text-transform: capitalize; }

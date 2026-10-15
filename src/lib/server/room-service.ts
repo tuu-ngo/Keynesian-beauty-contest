@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from "crypto";
+import { randomInt } from "crypto";
 import type { Account, HostCommand } from "@/contracts";
 import { createPlayerToken, PLAYER_SESSION_MS, tokenHash } from "@/lib/auth/player-session";
 import { applyCommand, createRoom, joinRun, purgeExpiredArchives, registerPlayer, resolveDeadline, submitPick, type CommandResult, type PickResult, type Room } from "@/lib/room";
@@ -94,7 +94,7 @@ export async function putPick(code: string, username: string, args: { runId: str
 export async function commandRoom(code: string, command: HostCommand, now = Date.now()): Promise<{ room: Room; result: CommandResult }> {
   await roomForRead(code, now);
   const result = await getRoomStore().mutateRoom(code, (room) => {
-    const outcome = applyCommand(room, command, now, randomUUID());
+    const outcome = applyCommand(room, command, now);
     return { room: outcome.room, value: outcome.result };
   });
   if (!result) throw new Error("ROOM_NOT_FOUND");

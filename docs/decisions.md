@@ -50,3 +50,10 @@ Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](c
 - Khi reveal, tất cả người gần target cố định nhất cùng thắng; average vẫn hiển thị để tham khảo nhưng không tham gia xác định winner. Điểm thắng/thua cơ bản vẫn được áp dụng.
 - `HOST_TARGET` chỉ dùng trong phase `NORMAL`, không kích hoạt Nash khi tất cả chọn `0`. Khi Host bắt đầu phase `ESCALATION`, cấu hình vòng kế tiếp tự trở về `STANDARD` và xóa target đang chờ.
 - Hủy kết quả giữ nguyên target đã snapshot để lần reveal lại cho kết quả xác định với cùng pick.
+
+## Luật 1 và leo thang (thay quyết định cũ)
+
+- Luật 1 chỉ bật khi vào leo thang (Nash, hoặc Host bật thủ công), từ vòng kế tiếp: ai chọn trùng số với người khác bị tính là thua vòng đó (không được điểm thắng, bị trừ `losePoints` nếu vòng có người thắng). Không loại người vì chọn trùng. Pick mặc định `50` không tính là trùng.
+- Bỏ việc loại trực tiếp mỗi vòng trong leo thang. Người chơi chỉ bị loại khi điểm về `0`. Điều này thay mục "Trong leo thang vẫn loại đúng một người" ở trên.
+- Luật 2 bật cùng lúc với Luật 1 khi vào leo thang, vì không còn "lần loại đầu tiên" để kích hoạt.
+- Host có thể tick/untick Luật 1 và Luật 2 giữa các vòng (sảnh hoặc sau khi công bố), ở cả vòng thường và leo thang. Lựa chọn áp dụng từ vòng kế. Khi vào leo thang, cả hai luật được bật lại; Host có thể tắt sau đó.

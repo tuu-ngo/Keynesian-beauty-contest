@@ -197,6 +197,8 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),
       startPoints: z.number().int().min(0).max(100000).optional(),
+      /** Rules the Host ticks for the rest of the run, from the next round. Escalation turns both on. */
+      activeRules: z.array(ruleIdSchema).max(2).optional(),
     }).strict(),
   }).strict(),
 ]);

@@ -18,7 +18,7 @@ export interface InternalRound extends Round {
   picks: Record<string, number>;
   /** Server-only while open. Values are whole virtual points and are settled at reveal. */
   stakes: Record<string, number>;
-  /** Players whose pick was filled with the default at lock. They count toward the average but cannot win and are eliminated first. */
+  /** Players whose pick was filled with the default at lock. They count toward the average but cannot win. */
   defaultedUsernames: string[];
   /** Secret fixed target for HOST_TARGET rounds, stored as integer tenths. */
   hostTargetTenths: number | null;
@@ -428,6 +428,9 @@ function score(round: InternalRound, run: Run): RoundResult {
     group.push(username);
     duplicateGroups.set(value, group);
   }
+  // Rule 1: everyone who picked the same number as someone else loses the round
+  // (basic losing points apply); nobody is knocked out for it. Escalation turns it
+  // on and the Host can tick or untick it between rounds.
   const ruleOne = run.activeRules.includes(1);
   const disqualified = ruleOne ? [...duplicateGroups.values()].filter((group) => group.length > 1).flat() : [];
   const disqualifiedSet = new Set(disqualified);
@@ -504,59 +507,6 @@ function score(round: InternalRound, run: Run): RoundResult {
   };
 }
 
-function seededIndex(seed: string, count: number): number {
-  // FNV-1a is deterministic and is only used after the cryptographically random
-  // seed has been persisted. It is not used to generate the seed itself.
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) % count;
-}
-
-function eliminate(room: Room, round: InternalRound, seed: string): void {
-  const run = room.run;
-  const result = round.result!;
-  const winners = new Set(result.winners);
-  const active = activeUsernames(run);
-  const defaulted = new Set(round.defaultedUsernames ?? []);
-  const submitted = new Set(Object.keys(round.picks).filter((username) => !defaulted.has(username)));
-  const disqualified = new Set(round.disqualifiedUsernames);
-  const groups = [
-    active.filter((username) => !submitted.has(username) && !winners.has(username)),
-    active.filter((username) => submitted.has(username) && disqualified.has(username) && !winners.has(username)),
-    active.filter((username) => submitted.has(username) && !disqualified.has(username) && !winners.has(username)),
-  ];
-  const candidates = groups.find((group) => group.length > 0) ?? [];
-  if (candidates.length === 0) return;
-  // Exact distance is only needed to choose among submitters. Recreate it from
-  // the immutable round settings/picks without using floating point values.
-  const submittedEntries = Object.entries(round.picks).filter(([username]) => run.participants[username]?.status === "ACTIVE");
-  let finalists = candidates;
-  if (submittedEntries.length > 0 && candidates.every((username) => submitted.has(username))) {
-    const sum = submittedEntries.reduce((total, [, value]) => total + value, 0);
-    const [targetNumerator, targetDenominator] = targetFraction(round, sum, submittedEntries.length);
-    const distances = new Map(submittedEntries.map(([username, value]) => {
-      const distance = BigInt(value) * targetDenominator - targetNumerator;
-      return [username, distance < 0n ? -distance : distance];
-    }));
-    let largest = -1n;
-    for (const username of candidates) {
-      const distance = distances.get(username) ?? 0n;
-      if (distance > largest) largest = distance;
-    }
-    finalists = candidates.filter((username) => (distances.get(username) ?? 0n) === largest);
-  }
-  finalists.sort();
-  const eliminated = finalists[seededIndex(seed, finalists.length)];
-  result.eliminationSeed = seed;
-  result.eliminationCandidates = finalists;
-  result.eliminatedUsername = eliminated;
-  run.participants[eliminated].status = "ELIMINATED";
-  run.participants[eliminated].eliminatedInRound = round.number;
-}
-
 /** Undo the effects of the current revealed round before allowing the Host to reveal it again. */
 function cancelRoundResult(run: Run): void {
   const round = currentRound(run)!;
@@ -597,7 +547,7 @@ function archive(room: Room, reason: "FINISH" | "RESET", now: number): void {
   });
 }
 
-export function applyCommand(room: Room, command: HostCommand, now: number, seed: string): { room: Room; result: CommandResult; changed: boolean } {
+export function applyCommand(room: Room, command: HostCommand, now: number): { room: Room; result: CommandResult; changed: boolean } {
   const existing = ensureVersion(room, command);
   if (existing) return { room, result: existing, changed: false };
   const next = resolveDeadline(clone(room), now);
@@ -670,14 +620,12 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
         if ((round.settings.roundMode ?? "STANDARD") !== "HOST_TARGET" && active.length >= 2 && active.every((username) => round.picks[username] === 0)) {
           run.phase = "ESCALATION";
           run.escalationReason = "NASH";
-          run.activeRules = [1];
+          run.activeRules = [1, 2];
         }
-      } else {
-        eliminate(next, round, seed);
-        if (round.result.eliminatedUsername && !run.activeRules.includes(2)) run.activeRules.push(2);
       }
       round.revealedAt = iso(now);
-      // Points elimination runs in both phases: anyone whose total hit 0 is out (rooms saved before this setting have it off).
+      // Running out of points is the only way to be eliminated, in both phases
+      // (rooms saved before this setting have it off).
       if ((round.settings.startPoints ?? 0) > 0) {
         for (const participant of activeParticipants(run)) {
           if (participant.totalPoints > 0) continue;
@@ -717,7 +665,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (run.status !== "ROUND_REVEALED" || run.phase !== "NORMAL") throw new RoomError("INVALID_TRANSITION");
       run.phase = "ESCALATION";
       run.escalationReason = "HOST";
-      run.activeRules = [1];
+      run.activeRules = [1, 2];
       if ((run.settingsForNextRound.roundMode ?? "STANDARD") === "HOST_TARGET") {
         run.settingsForNextRound.roundMode = "STANDARD";
         run.nextHostTargetTenths = null;
@@ -727,7 +675,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
     }
     case "UPDATE_SETTINGS": {
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
-      const { hostTarget, ...settings } = command.payload;
+      const { hostTarget, activeRules, ...settings } = command.payload;
       const nextMode = settings.roundMode ?? run.settingsForNextRound.roundMode ?? "STANDARD";
       if (run.phase === "ESCALATION" && nextMode === "HOST_TARGET") throw new RoomError("INVALID_TRANSITION", "Host target rounds are only available during normal play.");
       if (hostTarget !== undefined) {
@@ -738,6 +686,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       if (nextMode !== "HOST_TARGET") run.nextHostTargetTenths = null;
       if (nextMode === "HOST_TARGET" && run.nextHostTargetTenths == null) throw new RoomError("VALIDATION_ERROR", "Choose a Host target from 0 to 100.");
       run.settingsForNextRound = { ...run.settingsForNextRound, ...settings };
+      if (activeRules !== undefined) run.activeRules = ([1, 2] as const).filter((rule) => activeRules.includes(rule));
       syncStartPoints(run);
       changed = true;
       break;
