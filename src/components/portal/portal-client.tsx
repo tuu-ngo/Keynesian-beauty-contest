@@ -54,13 +54,14 @@ function JoinQr({ code }: { code: string }) {
 
 function Lobby({ game }: { game: PublicProjection }) {
   const p = game.nextRoundSettings.p;
-  return <section className="portal-stage portal-lobby"><div className="lobby-copy"><p className="eyeline">The room is gathering</p><h1>Scan to <mark>join</mark>.</h1><p>Scan to sign in with your roster account.</p><p className="portal-code" aria-label={`Game code ${game.code}`}>{game.code}</p><p className="rule-copy">{ruleSentence(p)}</p><p>The host will open the first round when everyone is ready.</p></div><JoinQr code={game.code} /><RosterWall game={game} /></section>;
+  return <section className="portal-stage portal-lobby"><div className="lobby-copy"><p className="eyeline">The room is gathering</p><h1>Scan to <mark>join</mark>.</h1><p>Scan to sign in with your roster account.</p><p className="portal-code" aria-label={`Game code ${game.code}`}>{game.code}</p><p className="rule-copy">{game.nextRoundSettings.roundMode === "HOST_TARGET" ? "Get closest to the Host’s secret target." : ruleSentence(p)}</p><p>The host will open the first round when everyone is ready.</p></div><JoinQr code={game.code} /><RosterWall game={game} /></section>;
 }
 
 function OpenRound({ game }: { game: PublicProjection }) {
   const round = game.currentRound;
   if (!round) return null;
-  return <section className="portal-stage portal-open"><p className="eyeline">Round {round.number}{round.settings.roundMode === "WAGER" ? " · Wager round" : ""}</p><h1>{round.settings.roundMode === "WAGER" ? "Choose. Then back it." : "Choose for the room."}</h1><p className="stage-rule">Closest to {multiplier(round.settings.p)} of the average wins.{round.settings.roundMode === "WAGER" ? " Staked winners split the pot." : ""}</p><Countdown className="portal-countdown" deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /><p className="portal-progress">{round.timerPaused && "Timer stopped · "}<strong>{game.submittedCount}</strong> of {game.activeCount} submitted</p><RosterWall game={game} progress /></section>;
+  const hostTargetRound = round.settings.roundMode === "HOST_TARGET";
+  return <section className="portal-stage portal-open"><p className="eyeline">Round {round.number}{round.settings.roundMode === "WAGER" ? " · Wager round" : hostTargetRound ? " · Secret target" : ""}</p><h1>{round.settings.roundMode === "WAGER" ? "Choose. Then back it." : hostTargetRound ? "Read the Host’s mind." : "Choose for the room."}</h1><p className="stage-rule">{hostTargetRound ? "Closest to the Host’s secret target wins." : `Closest to ${multiplier(round.settings.p)} of the average wins.`}{round.settings.roundMode === "WAGER" ? " Win for a 2× return; lose and forfeit the stake." : ""}</p><Countdown className="portal-countdown" deadlineAt={round.deadlineAt} serverNow={game.serverNow} paused={round.timerPaused} pausedRemainingMs={round.pausedRemainingMs} /><p className="portal-progress">{round.timerPaused && "Timer stopped · "}<strong>{game.submittedCount}</strong> of {game.activeCount} submitted</p><RosterWall game={game} progress /></section>;
 }
 
 function Locked({ game }: { game: PublicProjection }) {
@@ -70,7 +71,7 @@ function Locked({ game }: { game: PublicProjection }) {
 function Reveal({ game }: { game: PublicProjection }) {
   const result = game.revealedRounds.at(-1);
   if (!result) return <section className="portal-stage"><h1>Preparing the result</h1></section>;
-  return <section className="portal-stage portal-reveal"><div className="reveal-heading"><p className="eyeline">Round {result.number} result{result.settings.roundMode === "WAGER" ? " · Wager" : ""}</p><h1>The room has spoken.</h1></div><div className="reveal-metrics"><Metric prominent label="Average" value={decimal(result.average)} /><Metric prominent label="Target" value={decimal(result.target)} /></div><WinnerLine game={game} result={result} />{result.settings.roundMode === "WAGER" && <p className="wager-summary"><strong>{result.wagerPot} pts</strong> in the pot · {result.wagerRefunded ? "all stakes refunded" : "split between staked winners"}</p>}<Histogram result={result} /><EscalationNotice game={game} result={result} />{game.revealedRounds.length > 1 && <TrendChart rounds={game.revealedRounds} />}</section>;
+  return <section className="portal-stage portal-reveal"><div className="reveal-heading"><p className="eyeline">Round {result.number} result{result.settings.roundMode === "WAGER" ? " · Wager" : result.settings.roundMode === "HOST_TARGET" ? " · Host target" : ""}</p><h1>The room has spoken.</h1></div><div className="reveal-metrics"><Metric prominent label="Average" value={decimal(result.average)} /><Metric prominent label={result.settings.roundMode === "HOST_TARGET" ? "Host target" : "Target"} value={decimal(result.target)} /></div><WinnerLine game={game} result={result} />{result.settings.roundMode === "WAGER" && <p className="wager-summary">Winning stakes return <strong>2×</strong>; losing stakes are forfeited.</p>}<Histogram result={result} /><EscalationNotice game={game} result={result} />{game.revealedRounds.length > 1 && <TrendChart rounds={game.revealedRounds} />}</section>;
 }
 
 function Finished({ game }: { game: PublicProjection }) {
@@ -79,7 +80,7 @@ function Finished({ game }: { game: PublicProjection }) {
 
 function WinnerLine({ game, result }: { game: PublicProjection; result: RevealedRound }) {
   if (!result.winners.length) return <p className="winner-line">No eligible winner this round.</p>;
-  return <p className="winner-line">Winner{result.winners.length === 1 ? "" : "s"}: <strong>{result.winners.map((winner) => `${game.players.find((player) => player.username === winner.username)?.displayName ?? winner.username} · ${tenths(winner.valueTenths)} · ${winner.points >= 0 ? "+" : ""}${winner.points} pts${result.settings.roundMode === "WAGER" ? ` (${result.payoutsByUsername[winner.username] ?? 0} payout)` : ""}`).join(" / ")}</strong></p>;
+  return <p className="winner-line">Winner{result.winners.length === 1 ? "" : "s"}: <strong>{result.winners.map((winner) => `${game.players.find((player) => player.username === winner.username)?.displayName ?? winner.username} · ${tenths(winner.valueTenths)} · ${winner.points >= 0 ? "+" : ""}${winner.points} pts${result.settings.roundMode === "WAGER" ? ` (${result.payoutsByUsername[winner.username] ?? 0} returned)` : ""}`).join(" / ")}</strong></p>;
 }
 
 function RosterWall({ game, progress = false }: { game: PublicProjection; progress?: boolean }) {

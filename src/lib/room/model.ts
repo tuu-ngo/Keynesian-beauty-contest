@@ -20,6 +20,8 @@ export interface InternalRound extends Round {
   stakes: Record<string, number>;
   /** Players whose pick was filled with the default at lock. They count toward the average but cannot win and are eliminated first. */
   defaultedUsernames: string[];
+  /** Secret fixed target for HOST_TARGET rounds, stored as integer tenths. */
+  hostTargetTenths: number | null;
   /** Rule 1 needs this audit field; it is intentionally not part of the public result. */
   disqualifiedUsernames: string[];
   /** State changed by REVEAL_ROUND; retained only so the Host can undo that reveal safely. */
@@ -36,6 +38,8 @@ export interface Run {
   participants: Record<string, Participant>;
   participationLocked: boolean;
   settingsForNextRound: RoundSettings;
+  /** Server-only target prepared by the Host for the next HOST_TARGET round. */
+  nextHostTargetTenths: number | null;
   rounds: InternalRound[];
   createdAt: string;
   finishedAt: string | null;
@@ -194,6 +198,15 @@ function factor(p: RoundSettings["p"]): readonly [bigint, bigint] {
   }
 }
 
+function targetFraction(round: Pick<InternalRound, "settings" | "hostTargetTenths">, sum: number, count: number): readonly [bigint, bigint] {
+  if ((round.settings.roundMode ?? "STANDARD") === "HOST_TARGET") {
+    if (round.hostTargetTenths === null || round.hostTargetTenths === undefined) throw new RoomError("INVALID_STATE", "This round has no Host target.");
+    return [BigInt(round.hostTargetTenths), 1n];
+  }
+  const [numerator, denominator] = factor(round.settings.p);
+  return [numerator * BigInt(sum), denominator * BigInt(count)];
+}
+
 function decimal(numerator: bigint, denominator: bigint, digits = 10): string {
   if (denominator === 0n) return "0";
   const negative = numerator < 0n !== denominator < 0n;
@@ -275,6 +288,7 @@ function newRun(number: number, now: number): Run {
     participants: {},
     participationLocked: false,
     settingsForNextRound: clone(DEFAULT_ROUND_SETTINGS),
+    nextHostTargetTenths: null,
     rounds: [],
     createdAt: iso(now),
     finishedAt: null,
@@ -400,10 +414,8 @@ function score(round: InternalRound, run: Run): RoundResult {
   }
   const sum = entries.reduce((total, [, value]) => total + value, 0);
   const numberOfPicks = BigInt(entries.length);
-  const [factorNumerator, factorDenominator] = factor(round.settings.p);
   // Values are integer tenths. The target numerator uses those same units.
-  const targetNumerator = factorNumerator * BigInt(sum);
-  const targetDenominator = factorDenominator * numberOfPicks;
+  const [targetNumerator, targetDenominator] = targetFraction(round, sum, entries.length);
   const distances = new Map(entries.map(([username, value]) => [username, value < 0 ? 0n : (BigInt(value) * targetDenominator - targetNumerator < 0n ? -(BigInt(value) * targetDenominator - targetNumerator) : BigInt(value) * targetDenominator - targetNumerator)]));
 
   // Default picks count toward the average, but they are not a choice: they
@@ -445,29 +457,16 @@ function score(round: InternalRound, run: Run): RoundResult {
   const wagerPot = wagerRound
     ? activeParticipants(run).reduce((total, participant) => total + (stakes[participant.username] ?? 0), 0)
     : 0;
-  const stakedWinners = winners.filter((username) => (stakes[username] ?? 0) > 0).sort();
   const payoutsByUsername: Record<string, number> = {};
-  const wagerRefunded = wagerRound && wagerPot > 0 && stakedWinners.length === 0;
-
-  if (wagerRefunded) {
-    for (const participant of activeParticipants(run)) {
-      const stake = stakes[participant.username] ?? 0;
-      if (stake > 0) payoutsByUsername[participant.username] = stake;
-    }
-  } else if (wagerRound && wagerPot > 0 && stakedWinners.length > 0) {
-    const winningStake = stakedWinners.reduce((total, username) => total + (stakes[username] ?? 0), 0);
-    const shares = stakedWinners.map((username) => {
-      const numerator = wagerPot * (stakes[username] ?? 0);
-      const payout = Math.floor(numerator / winningStake);
-      return { username, payout, remainder: numerator % winningStake };
-    });
-    let remaining = wagerPot - shares.reduce((total, share) => total + share.payout, 0);
-    shares.sort((left, right) => right.remainder - left.remainder || left.username.localeCompare(right.username));
-    for (const share of shares) {
-      if (remaining > 0) { share.payout += 1; remaining -= 1; }
-      payoutsByUsername[share.username] = share.payout;
+  if (wagerRound) {
+    for (const username of winners) {
+      const stake = stakes[username] ?? 0;
+      if (stake > 0) payoutsByUsername[username] = stake * 2;
     }
   }
+  // Kept in the result shape for compatibility with existing snapshots. Fixed-odds
+  // wager rounds never refund losing stakes.
+  const wagerRefunded = false;
 
   const pointsByUsername: Record<string, number> = {};
   const basePointsByUsername: Record<string, number> = {};
@@ -478,8 +477,9 @@ function score(round: InternalRound, run: Run): RoundResult {
     const total = participant.totalPoints;
     const afterWager = total - stake + payout;
     const rawBase = winnerSet.has(participant.username) ? winPoints : winners.length > 0 ? -losePoints : 0;
-    // Stake was validated against the pre-round balance. Apply base scoring
-    // after the conserved pot settlement, with the existing zero floor.
+    // Stake was validated against the pre-round balance. A winner receives
+    // twice the stake (net +stake); a non-winner receives nothing (net -stake).
+    // Apply base scoring afterwards, with the existing zero floor.
     const next = Math.max(0, afterWager + rawBase);
     const wagerDelta = afterWager - total;
     const baseDelta = next - afterWager;
@@ -536,9 +536,7 @@ function eliminate(room: Room, round: InternalRound, seed: string): void {
   let finalists = candidates;
   if (submittedEntries.length > 0 && candidates.every((username) => submitted.has(username))) {
     const sum = submittedEntries.reduce((total, [, value]) => total + value, 0);
-    const [numerator, denominator] = factor(round.settings.p);
-    const targetNumerator = numerator * BigInt(sum);
-    const targetDenominator = denominator * BigInt(submittedEntries.length);
+    const [targetNumerator, targetDenominator] = targetFraction(round, sum, submittedEntries.length);
     const distances = new Map(submittedEntries.map(([username, value]) => {
       const distance = BigInt(value) * targetDenominator - targetNumerator;
       return [username, distance < 0n ? -distance : distance];
@@ -615,8 +613,11 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       // earlier rounds' receipts keeps the persisted snapshot from growing all game.
       next.pickReceipts = {};
       const settings = clone(run.settingsForNextRound);
+      const roundMode = settings.roundMode ?? "STANDARD";
+      if (roundMode === "HOST_TARGET" && run.phase !== "NORMAL") throw new RoomError("INVALID_TRANSITION", "Host target rounds are only available during normal play.");
+      if (roundMode === "HOST_TARGET" && run.nextHostTargetTenths == null) throw new RoomError("INVALID_TRANSITION", "Choose and save a Host target before opening the round.");
       const openedAt = iso(now);
-      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, stakes: {}, defaultedUsernames: [], disqualifiedUsernames: [], revealStateBefore: null });
+      run.rounds.push({ number: run.rounds.length + 1, settings, openedAt, deadlineAt: deadline(settings, now), timerPaused: false, pausedRemainingMs: null, lockedAt: null, revealedAt: null, result: null, picks: {}, stakes: {}, defaultedUsernames: [], hostTargetTenths: roundMode === "HOST_TARGET" ? run.nextHostTargetTenths : null, disqualifiedUsernames: [], revealStateBefore: null });
       run.status = "ROUND_OPEN";
       changed = true;
       break;
@@ -666,7 +667,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       for (const [username, points] of Object.entries(round.result.pointsByUsername)) run.participants[username].totalPoints += points;
       if (run.phase === "NORMAL") {
         const active = activeUsernames(run);
-        if (active.length >= 2 && active.every((username) => round.picks[username] === 0)) {
+        if ((round.settings.roundMode ?? "STANDARD") !== "HOST_TARGET" && active.length >= 2 && active.every((username) => round.picks[username] === 0)) {
           run.phase = "ESCALATION";
           run.escalationReason = "NASH";
           run.activeRules = [1];
@@ -717,12 +718,26 @@ export function applyCommand(room: Room, command: HostCommand, now: number, seed
       run.phase = "ESCALATION";
       run.escalationReason = "HOST";
       run.activeRules = [1];
+      if ((run.settingsForNextRound.roundMode ?? "STANDARD") === "HOST_TARGET") {
+        run.settingsForNextRound.roundMode = "STANDARD";
+        run.nextHostTargetTenths = null;
+      }
       changed = true;
       break;
     }
     case "UPDATE_SETTINGS": {
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
-      run.settingsForNextRound = { ...run.settingsForNextRound, ...command.payload };
+      const { hostTarget, ...settings } = command.payload;
+      const nextMode = settings.roundMode ?? run.settingsForNextRound.roundMode ?? "STANDARD";
+      if (run.phase === "ESCALATION" && nextMode === "HOST_TARGET") throw new RoomError("INVALID_TRANSITION", "Host target rounds are only available during normal play.");
+      if (hostTarget !== undefined) {
+        const targetTenths = exactTenths(hostTarget);
+        if (targetTenths === null) throw new RoomError("VALIDATION_ERROR", "Host target must be a whole number from 0 to 100.");
+        run.nextHostTargetTenths = targetTenths;
+      }
+      if (nextMode !== "HOST_TARGET") run.nextHostTargetTenths = null;
+      if (nextMode === "HOST_TARGET" && run.nextHostTargetTenths == null) throw new RoomError("VALIDATION_ERROR", "Choose a Host target from 0 to 100.");
+      run.settingsForNextRound = { ...run.settingsForNextRound, ...settings };
       syncStartPoints(run);
       changed = true;
       break;
@@ -807,8 +822,8 @@ export function publicArchive(room: Room, options: { hideOpenRoundPicks?: boolea
       rounds: run.rounds.map(({ disqualifiedUsernames, revealStateBefore, ...round }) => {
         void disqualifiedUsernames;
         void revealStateBefore;
-        const exported = { ...clone(round), stakes: clone(round.stakes ?? {}) };
-        return round.number === hiddenRound ? { ...exported, picks: {}, stakes: {} } : exported;
+        const exported = { ...clone(round), stakes: clone(round.stakes ?? {}), hostTargetTenths: round.hostTargetTenths ?? null };
+        return round.number === hiddenRound ? { ...exported, picks: {}, stakes: {}, hostTargetTenths: null } : exported;
       }),
       createdAt: run.createdAt,
       finishedAt: run.finishedAt,
@@ -829,9 +844,7 @@ export function csvForArchive(archive: PublicArchive): string {
     const result = round.result!;
     const submitted = Object.values(round.picks);
     const sum = submitted.reduce((total, value) => total + value, 0);
-    const [factorNumerator, factorDenominator] = factor(round.settings.p);
-    const targetNumerator = factorNumerator * BigInt(sum);
-    const targetDenominator = factorDenominator * BigInt(submitted.length || 1);
+    const [targetNumerator, targetDenominator] = targetFraction(round, sum, submitted.length || 1);
     for (const participant of archive.run.participants) {
       const pick = round.picks[participant.username];
       const rawDistance = pick === undefined || result.target === null ? null : BigInt(pick) * targetDenominator - targetNumerator;

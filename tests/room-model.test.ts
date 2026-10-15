@@ -337,41 +337,42 @@ describe("room model", () => {
       return command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
     }
 
-    it("splits the whole pot between winners by stake, then applies basic scoring", () => {
+    it("doubles each winner's stake, forfeits losing stakes, then applies basic scoring", () => {
       const game = wagerRound(joinAll(room()), {
         ada: { value: 10, stake: 10 },
         bea: { value: 10, stake: 20 },
-        cy: { value: 70, stake: 30 },
+        cy: { value: 70, stake: 10 },
       }, { startPoints: 100, winPoints: 10, losePoints: 5 });
       const result = game.run.rounds[0].result!;
 
       expect(result.winners).toEqual(["ada", "bea"]);
-      expect(result.wagerPot).toBe(60);
+      expect(result.wagerPot).toBe(40);
       expect(result.payoutsByUsername).toEqual({ ada: 20, bea: 40 });
-      expect(result.wagerPointsByUsername).toEqual({ ada: 10, bea: 20, cy: -30 });
+      expect(result.wagerPointsByUsername).toEqual({ ada: 10, bea: 20, cy: -10 });
       expect(result.basePointsByUsername).toEqual({ ada: 10, bea: 10, cy: -5 });
-      expect(result.pointsByUsername).toEqual({ ada: 20, bea: 30, cy: -35 });
-      expect(Object.fromEntries(Object.entries(game.run.participants).map(([username, player]) => [username, player.totalPoints]))).toEqual({ ada: 120, bea: 130, cy: 65 });
+      expect(result.pointsByUsername).toEqual({ ada: 20, bea: 30, cy: -15 });
+      expect(Object.fromEntries(Object.entries(game.run.participants).map(([username, player]) => [username, player.totalPoints]))).toEqual({ ada: 120, bea: 130, cy: 85 });
     });
 
-    it("assigns indivisible remainder points deterministically by username", () => {
+    it("pays every tied winner at the same fixed two-times odds", () => {
       const game = wagerRound(joinAll(room()), {
         ada: { value: 10, stake: 1 },
         bea: { value: 10, stake: 1 },
         cy: { value: 70, stake: 1 },
       }, { winPoints: 0, losePoints: 0 });
-      expect(game.run.rounds[0].result?.payoutsByUsername).toEqual({ ada: 2, bea: 1 });
+      expect(game.run.rounds[0].result?.payoutsByUsername).toEqual({ ada: 2, bea: 2 });
+      expect(game.run.rounds[0].result?.wagerPointsByUsername).toEqual({ ada: 1, bea: 1, cy: -1 });
     });
 
-    it("refunds every stake when no winner has staked points", () => {
+    it("does not refund a loser's stake when the winners staked zero", () => {
       const game = wagerRound(joinAll(room()), {
         ada: { value: 10, stake: 0 },
         bea: { value: 10, stake: 0 },
         cy: { value: 70, stake: 30 },
       }, { winPoints: 0, losePoints: 0 });
       const result = game.run.rounds[0].result!;
-      expect(result).toMatchObject({ wagerPot: 30, wagerRefunded: true, payoutsByUsername: { cy: 30 }, wagerPointsByUsername: {}, pointsByUsername: {} });
-      expect(game.run.participants.cy.totalPoints).toBe(100);
+      expect(result).toMatchObject({ wagerPot: 30, wagerRefunded: false, payoutsByUsername: {}, wagerPointsByUsername: { cy: -30 }, pointsByUsername: { cy: -30 } });
+      expect(game.run.participants.cy.totalPoints).toBe(70);
     });
 
     it("keeps stakes private while open and reveals them after lock/reveal", () => {
@@ -457,6 +458,94 @@ describe("room model", () => {
       const csv = csvForArchive(publicArchive(game));
       expect(csv.split("\r\n")[0]).toBe("runId,round,roundMode,username,displayName,teamId,pick,distance,stake,payout,wagerPoints,basePoints,points,winner,eliminated");
       expect(csv).toContain(",WAGER,ada,Ada,red,10,");
+    });
+  });
+  describe("Host target rounds", () => {
+    function prepare(input: Room, target: number): Room {
+      return applyCommand(input, {
+        type: "UPDATE_SETTINGS",
+        commandId: crypto.randomUUID(),
+        expectedVersion: input.version,
+        payload: { roundMode: "HOST_TARGET", hostTarget: target },
+      }, NOW, "s").room;
+    }
+
+    it("keeps the fixed target secret until reveal and awards equally close players", () => {
+      let game = prepare(joinAll(room()), 37);
+      const lobbyPublic = project(game, "public", NOW);
+      const lobbyHost = project(game, "host", NOW);
+      expect("nextHostTarget" in lobbyPublic).toBe(false);
+      expect(lobbyHost.view === "host" && lobbyHost.nextHostTarget).toBe(37);
+
+      game = command(game, "OPEN_ROUND").room;
+      expect(game.run.rounds[0].hostTargetTenths).toBe(370);
+      const publicOpen = project(game, "public", NOW);
+      const playerOpen = project(game, "player", NOW, "ada");
+      const hostOpen = project(game, "host", NOW);
+      expect(JSON.stringify(publicOpen)).not.toContain("hostTarget");
+      expect(JSON.stringify(playerOpen)).not.toContain("hostTarget");
+      expect(hostOpen.view === "host" && hostOpen.currentHostTarget).toBe(37);
+      expect(publicArchive(game, { hideOpenRoundPicks: true }).run.rounds[0].hostTargetTenths).toBeNull();
+
+      for (const [username, value] of Object.entries({ ada: 35, bea: 39, cy: 80 })) {
+        game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      expect(game.run.rounds[0].result).toMatchObject({ target: "37", winners: ["ada", "bea"] });
+      expect(project(game, "public", NOW).revealedRounds[0]).toMatchObject({ target: "37", winners: [{ username: "ada" }, { username: "bea" }] });
+    });
+
+    it("does not trigger Nash when everyone chooses zero", () => {
+      let game = prepare(joinAll(room()), 10);
+      game = command(game, "OPEN_ROUND").room;
+      for (const username of ["ada", "bea", "cy"]) {
+        game = submitPick(game, { username, runId: game.run.id, round: 1, value: 0, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      expect(game.run).toMatchObject({ status: "ROUND_REVEALED", phase: "NORMAL", escalationReason: null, activeRules: [] });
+    });
+
+    it("requires a valid saved target and excludes this mode from escalation", () => {
+      const joined = joinAll(room());
+      expect(() => applyCommand(joined, {
+        type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { roundMode: "HOST_TARGET" },
+      }, NOW, "s")).toThrow("Choose a Host target");
+      expect(hostCommandSchema.safeParse({
+        type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: joined.version, payload: { roundMode: "HOST_TARGET", hostTarget: 37.5 },
+      }).success).toBe(false);
+
+      let game = prepare(joined, 37);
+      game = command(game, "OPEN_ROUND").room;
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      game = command(game, "START_ESCALATION").room;
+      expect(game.run.settingsForNextRound.roundMode).toBe("STANDARD");
+      expect(game.run.nextHostTargetTenths).toBeNull();
+      expect(() => applyCommand(game, {
+        type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: game.version, payload: { roundMode: "HOST_TARGET", hostTarget: 20 },
+      }, NOW, "s")).toThrow("only available during normal play");
+    });
+
+    it("keeps the snapshotted target when a result is cancelled and revealed again", () => {
+      let game = prepare(joinAll(room()), 42);
+      game = command(game, "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries({ ada: 40, bea: 44, cy: 80 })) {
+        game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      const first = game.run.rounds[0].result?.winners;
+      game = command(game, "CANCEL_ROUND_RESULT").room;
+      expect(game.run.rounds[0].hostTargetTenths).toBe(420);
+      game = command(game, "REVEAL_ROUND").room;
+      expect(game.run.rounds[0].result).toMatchObject({ target: "42", winners: first });
+    });
+
+    it("uses the fixed target for CSV distances and the default pick", () => {
+      let game = prepare(joinAll(room()), 50);
+      game = command(game, "OPEN_ROUND").room;
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      expect(game.run.rounds[0].result?.winners.sort()).toEqual(["ada", "bea", "cy"]);
+      const csv = csvForArchive(publicArchive(game));
+      expect(csv).toContain(",HOST_TARGET,ada,Ada,red,50,0,");
     });
   });
   it("rejects picks that are not whole numbers between 0 and 100", () => {

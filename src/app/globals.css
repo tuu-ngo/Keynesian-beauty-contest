@@ -126,8 +126,8 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 }
 
 /* Fields */
-.form-panel input, .next-settings select, .stake-number input { min-height: 50px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-surface); color: var(--nb-text); padding: 11px 14px; box-shadow: var(--nb-shadow-sm); font-size: 16px; font-weight: 600; transition: box-shadow 100ms ease, background-color 100ms ease; }
-.form-panel input:focus, .next-settings select:focus, .pick-number input:focus, .stake-number input:focus { outline: none; background: var(--nb-field-focus); box-shadow: var(--nb-shadow); }
+.form-panel input, .next-settings select, .next-settings input, .stake-number input { min-height: 50px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-surface); color: var(--nb-text); padding: 11px 14px; box-shadow: var(--nb-shadow-sm); font-size: 16px; font-weight: 600; transition: box-shadow 100ms ease, background-color 100ms ease; }
+.form-panel input:focus, .next-settings select:focus, .next-settings input:focus, .pick-number input:focus, .stake-number input:focus { outline: none; background: var(--nb-field-focus); box-shadow: var(--nb-shadow); }
 .form-panel input::placeholder { color: var(--nb-muted); opacity: .7; }
 .next-settings select { appearance: none; padding-right: 44px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='3' stroke-linecap='square'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-position: right 14px center; background-repeat: no-repeat; }
 
@@ -237,6 +237,7 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 .next-settings { display: grid; gap: 14px; margin-top: 18px; padding: 20px; }
 .next-settings h2, .roster h2, .host-round-detail h2 { margin: 0; font-size: 22px; }
 .next-settings p { margin: 0; color: var(--nb-muted); font-size: 14px; }
+.next-settings small { color: var(--nb-muted); font-size: 12px; font-weight: 500; }
 .host-live { display: grid; align-content: start; gap: 22px; }
 .host-live > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-lavender); padding: 24px; box-shadow: var(--nb-shadow); }
 .host-live > header h2 { margin: 0; font-size: 44px; line-height: 1; text-transform: capitalize; }
@@ -257,6 +258,10 @@ mark { display: inline-block; border: var(--nb-border); background: var(--nb-pin
 .roster li > span:last-child { color: var(--nb-muted); }
 .host-round-detail { display: grid; gap: 18px; }
 .host-round-detail > p { margin: 0; color: var(--nb-muted); }
+.host-round-detail .host-secret-target { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 16px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-yellow); padding: 12px 16px; box-shadow: var(--nb-shadow-sm); color: #000; }
+.host-secret-target span, .host-secret-target small { font-family: var(--nb-font-mono); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.host-secret-target strong { grid-row: 1 / 3; grid-column: 2; font-family: var(--nb-font-mono); font-size: 34px; }
+.host-secret-target small { color: #333; font-size: 10px; }
 .host-picks { border: var(--nb-rule); border-radius: var(--nb-radius); }
 .host-picks strong { font-family: var(--nb-font-mono); }
 .analytics { display: grid; gap: 10px; border: var(--nb-border); border-radius: var(--nb-radius); background: var(--nb-green); padding: 16px 18px; box-shadow: var(--nb-shadow-sm); }

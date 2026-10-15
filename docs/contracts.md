@@ -38,7 +38,7 @@ type Phase = 'NORMAL' | 'ESCALATION';
 type Status = 'LOBBY' | 'ROUND_OPEN' | 'ROUND_LOCKED' | 'ROUND_REVEALED' | 'FINISHED';
 type RuleId = 1 | 2;
 type P = '0.8' | '2/3' | '1/2';
-type RoundMode = 'STANDARD' | 'WAGER';
+type RoundMode = 'STANDARD' | 'WAGER' | 'HOST_TARGET';
 
 type Team = { id: string; name: string; image?: string; color?: string };
 type Account = { username: string; displayName: string; teamId: string };
@@ -144,11 +144,13 @@ type PlayerProjection = PublicFields & {
 type HostProjection = PublicFields & {
   view: 'host';
   hostPicks: { username: string; valueTenths: number; stakePoints: number }[] | null;
+  nextHostTarget: number | null; // whole number 0..100; Host-only
+  currentHostTarget: number | null; // snapshotted target for the current round; Host-only
 };
 type StateResponse = PublicProjection | PlayerProjection | HostProjection;
 ```
 
-`players.hasSubmitted` và `submittedCount` chỉ tính active của vòng hiện tại. `revealedRounds` chỉ gồm vòng đã công bố. `hostPicks = null` trong OPEN và LOBBY; sau LOCK có thể chứa pick của vòng hiện tại. Field riêng của Player chỉ chứa pick của chính họ. M0 phải tạo fixture đúng shape cho mỗi trạng thái, gồm trường hợp không có pick và sau reset.
+`players.hasSubmitted` và `submittedCount` chỉ tính active của vòng hiện tại. `revealedRounds` chỉ gồm vòng đã công bố. `hostPicks = null` trong OPEN và LOBBY; sau LOCK có thể chứa pick của vòng hiện tại. Field riêng của Player chỉ chứa pick của chính họ. Target bí mật được lưu server-side dưới dạng integer tenths (`nextHostTargetTenths` và snapshot `hostTargetTenths` trên round), không nằm trong `RoundSettings`; chỉ HostProjection có giá trị này trước reveal. M0 phải tạo fixture đúng shape cho mỗi trạng thái, gồm trường hợp không có pick và sau reset.
 
 ## 4. Lệnh và invariant game
 
@@ -157,7 +159,7 @@ Máy trạng thái: `LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED �
 ```ts
 type HostCommand = { commandId: string; expectedVersion: number } & (
   | { type: 'OPEN_ROUND' | 'LOCK_ROUND' | 'REVEAL_ROUND' | 'START_ESCALATION' | 'FINISH' | 'RESET' }
-  | { type: 'UPDATE_SETTINGS'; payload: { roundMode?: RoundMode; p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number } }
+  | { type: 'UPDATE_SETTINGS'; payload: { roundMode?: RoundMode; hostTarget?: number; p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number } }
 );
 ```
 
@@ -167,7 +169,7 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 | `LOCK_ROUND` | `ROUND_OPEN` | Chốt picks. Deadline hết hạn cũng gọi transition này từ server khi request kế tiếp đến. |
 | `REVEAL_ROUND` | `ROUND_LOCKED` | Tính kết quả duy nhất, điểm, Nash hoặc loại và quy tắc mới; có thể tự `FINISHED` nếu còn một active. |
 | `START_ESCALATION` | `NORMAL`, sau một vòng `ROUND_REVEALED` | Đặt phase B và Rule 1 cho vòng kế; `escalationReason='HOST'`. |
-| `UPDATE_SETTINGS` | `LOBBY` hoặc `ROUND_REVEALED` | Chỉ sửa `p` và timer cho vòng kế. Vòng đã mở giữ nguyên settings snapshot. |
+| `UPDATE_SETTINGS` | `LOBBY` hoặc `ROUND_REVEALED` | Sửa loại vòng, target bí mật (khi dùng), `p`, timer và cấu hình điểm cho vòng kế. Vòng đã mở giữ nguyên settings/target snapshot. |
 | `FINISH` | Room chưa `FINISHED` | Chốt run sớm, tạo bản export/retention. |
 | `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới, xóa vòng/điểm/loại/participant của run; giữ room code, roster và các session hợp lệ. |
 
@@ -175,8 +177,9 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 - Sau reset, token Player cũ vẫn xác thực account nhưng account phải vào sảnh của `runId` mới để thành participant. App đang mở tự gọi lệnh join cho run mới; account offline không tự được tính. `join` sau khi mở vòng 1 chỉ hợp lệ với participant đã nằm trong run đó (để khôi phục phiên), không thêm người mới.
 - Tất cả phép so sánh pick dùng số nguyên phần mười. `p` là phân số chính xác `4/5`, `2/3` hoặc `1/2`; trung bình, target và khoảng cách được so sánh bằng phân số/số nguyên, chỉ làm tròn khi trình bày.
 - Người chưa bấm lưu khi vòng bị khóa (Host khóa hoặc hết giờ) được tính pick mặc định `50`, giống giá trị form hiển thị; vì vậy luôn có pick khi có từ 2 người chơi. Pick mặc định chỉ được tính vào trung bình: người đó không thể thắng, không làm pick thật bằng `50` bị Rule 1 coi là trùng, và trong ESCALATION vẫn thuộc nhóm "không gửi" bị loại trước. Danh sách được lưu ở `defaultedUsernames` của vòng. Nếu vẫn không có pick: `average = target = null`, không có winner. Hòa gần target: mọi người hòa đều thắng và mỗi người +10. Bonus suýt thắng tắt trong MVP.
-- Với vòng `WAGER`, request lưu pick nhận thêm `stake` là số nguyên `0..totalPoints`. Pick và stake được thay thế atomically. Khi reveal: trừ stake → chia toàn bộ pot cho winner có stake theo tỷ lệ → áp dụng điểm thắng/thua cơ bản với sàn 0. Phần điểm không chia hết dùng largest-remainder, hòa phần dư ưu tiên username tăng dần. Không có winner đặt stake thì hoàn toàn bộ stake. Stake mặc định khi lock là `0`.
-- Điều kiện Nash: sau reveal trong NORMAL, ít nhất 2 active và **tất cả active** đã chọn đúng `0`. Khi đó phase chuyển sang ESCALATION, hiện thông báo Nash, Rule 1 áp dụng từ vòng kế. Chuyển thủ công chỉ được ghi `HOST` và không được ghi là Nash.
+- Với vòng `WAGER`, request lưu pick nhận thêm `stake` là số nguyên `0..totalPoints`. Pick và stake được thay thế atomically. Khi reveal: winner nhận lại `2 × stake` (lãi ròng `+stake`), non-winner mất stake (`-stake`), rồi áp dụng điểm thắng/thua cơ bản với sàn 0. Không có pot chung hoặc hoàn cược. Stake mặc định khi lock là `0`. Các field `wagerPot` và `wagerRefunded` được giữ để tương thích snapshot cũ; với kết quả mới, `wagerPot` chỉ là tổng stake để audit và `wagerRefunded` luôn là `false`.
+- Với vòng `HOST_TARGET`, Host phải lưu trước một số nguyên `0..100`; server snapshot thành integer tenths khi mở vòng. Average vẫn được tính để hiển thị nhưng winner là mọi người gần fixed target nhất. Target chỉ xuất hiện trong public/player response qua `result.target` sau reveal. Mode này chỉ hợp lệ ở NORMAL; khi bắt đầu ESCALATION, mode vòng kế được đưa về `STANDARD` và target chờ bị xóa.
+- Điều kiện Nash: sau reveal trong NORMAL, ít nhất 2 active và **tất cả active** đã chọn đúng `0`. Khi đó phase chuyển sang ESCALATION, hiện thông báo Nash, Rule 1 áp dụng từ vòng kế. `HOST_TARGET` không kích hoạt Nash dù tất cả chọn `0`. Chuyển thủ công chỉ được ghi `HOST` và không được ghi là Nash.
 - ESCALATION: pick trùng vẫn vào trung bình nhưng người chọn trùng bị Rule 1 loại khỏi tập thắng. Nếu có `0` và đúng một `100` đủ điều kiện sau Rule 1, Rule 2 cho `100` thắng; nếu không, xét người còn đủ điều kiện gần target nhất. Không có ai đủ điều kiện thì không có winner. Sau mỗi vòng B loại đúng một active khác winner; ưu tiên người không gửi → người trùng → người thua còn lại, rồi khoảng cách xa target nhất, cuối cùng seed đã lưu. Nếu nhóm không gửi hoặc không có target, tie-break bằng seed. Rule 2 bật sau lần loại đầu, giữ nguyên sau đó. Còn một active thì tự FINISHED.
 - Điểm đội = tổng `totalPoints` của mọi participant trong đội, kể cả đã bị loại. Đội đồng điểm cùng hạng. Nếu FINISH sớm với nhiều active, bảng điểm cá nhân xếp theo điểm; nếu chỉ còn một active, người đó là survivor champion và bảng điểm vẫn hiển thị riêng.
 
@@ -200,9 +203,9 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 
 `GET state` dùng cùng path với `view` tường minh để Portal luôn nhận public projection, kể cả khi cùng trình duyệt có cookie Host. `view` là yêu cầu về dữ liệu, không phải bằng chứng xác thực. Response có `version`, `serverNow`, `runId`, `status`, `phase`, `teams`, tiến độ, bảng điểm, dữ liệu theo trạng thái. Cụ thể:
 
-- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Sau reveal chỉ có pick của vòng đã công bố và dữ liệu tổng hợp. Không có token.
+- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Target bí mật của Host cũng không nằm trong settings hay projection trước reveal. Sau reveal chỉ có pick của vòng đã công bố và dữ liệu tổng hợp. Không có token.
 - **Player:** PublicProjection cộng pick hiện tại của chính mình và trạng thái riêng. Không có pick của người khác trước reveal.
-- **Host:** danh sách đã/chưa gửi khi vòng mở; chỉ thấy pick của người khác sau `ROUND_LOCKED`; có thể xem archive qua endpoint Host riêng.
+- **Host:** danh sách đã/chưa gửi khi vòng mở; chỉ thấy pick của người khác sau `ROUND_LOCKED`; có `nextHostTarget` và `currentHostTarget` để quản lý target bí mật; có thể xem archive qua endpoint Host riêng.
 - Mỗi trạng thái ứng với `ETag: "<version>-<projection-role>-<runId>"`; 304 chỉ sau khi xác thực role và kiểm tra version. Poll mỗi 1 giây, thêm jitter nhỏ và tránh request chồng. Client refetch ngay khi tab hiện lại hoặc mạng phục hồi. Nếu dữ liệu run FINISHED đã hết hạn mà room shell còn, API trả `410 RUN_EXPIRED`; Portal hiển thị thông báo thay vì trang trắng, Host vẫn có thể RESET.
 - Host cookie dùng `HttpOnly`, `Secure` ở production, `SameSite=Strict`; API ghi kiểm tra `Origin`. Login Host/Player và pick có rate limit cơ bản.
 - `results.csv` có một dòng cho mỗi participant của từng vòng đã **công bố**: `runId,round,roundMode,username,displayName,teamId,pick,distance,stake,payout,wagerPoints,basePoints,points,winner,eliminated`. Ô thiếu pick/distance để trống. `game.json` gồm snapshot run, đội, participants, các vòng kể cả vòng dở bị reset, và bảng điểm; không có token. Archive chỉ Host xem và xuất.

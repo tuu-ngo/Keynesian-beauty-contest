@@ -39,6 +39,14 @@ Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](c
 
 - Host chọn loại cho vòng kế tiếp: `STANDARD` hoặc `WAGER`. Lựa chọn được snapshot khi mở vòng, độc lập với phase `NORMAL | ESCALATION`, và có thể đổi lại sau mỗi vòng đã công bố.
 - Cá cược chỉ dùng điểm ảo trong game. Player lưu `pick` và `stake` nguyên, không âm trong cùng một request; stake không vượt quá tổng điểm hiện có. Người không gửi được pick mặc định `50` và stake mặc định `0` khi khóa vòng.
-- Khi công bố vòng cá cược, server trừ stake, chia toàn bộ pot cho những winner có stake theo tỷ lệ stake, rồi áp dụng điểm thắng/thua cơ bản. Điểm chia lẻ dùng largest-remainder; phần dư bằng nhau ưu tiên username theo thứ tự tăng dần để kết quả xác định.
-- Winner có stake `0` vẫn nhận điểm thắng cơ bản nhưng không nhận pot. Nếu không winner nào có stake, tất cả stake được hoàn. Sau đó mới xét loại vì điểm về `0`.
+- Khi công bố vòng cá cược, mỗi winner nhận lại `2 × stake`, tức lãi ròng đúng bằng stake; mỗi non-winner mất toàn bộ stake. Không gom hoặc chia pot và không hoàn cược. Sau đó server áp dụng điểm thắng/thua cơ bản.
+- Winner đặt `0` vẫn nhận điểm thắng cơ bản nhưng không có lãi cược. Sau khi cộng cả phần cược và điểm cơ bản mới xét loại vì điểm về `0`.
 - Stake của người khác được giữ kín khi vòng mở. Sau reveal, stake, payout, wager delta, base delta và tổng delta được công bố/xuất. Hủy kết quả hoàn tác đúng tổng delta và cho phép reveal lại cùng pick/stake.
+
+## Round target bí mật của Host
+
+- Host có thể chọn `HOST_TARGET` cho vòng kế tiếp và đặt trước một target nguyên trong `0..100`. Mode này độc lập với `STANDARD` và `WAGER`, không kết hợp cá cược trong MVP.
+- Target được lưu server-side và snapshot khi mở vòng. Player và Portal chỉ biết đây là round target bí mật; giá trị không xuất hiện trong projection hoặc bản export live trước reveal. Host vẫn nhìn thấy target để điều hành.
+- Khi reveal, tất cả người gần target cố định nhất cùng thắng; average vẫn hiển thị để tham khảo nhưng không tham gia xác định winner. Điểm thắng/thua cơ bản vẫn được áp dụng.
+- `HOST_TARGET` chỉ dùng trong phase `NORMAL`, không kích hoạt Nash khi tất cả chọn `0`. Khi Host bắt đầu phase `ESCALATION`, cấu hình vòng kế tiếp tự trở về `STANDARD` và xóa target đang chờ.
+- Hủy kết quả giữ nguyên target đã snapshot để lần reveal lại cho kết quả xác định với cùng pick.

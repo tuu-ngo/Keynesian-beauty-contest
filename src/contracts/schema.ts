@@ -7,7 +7,7 @@ export const phaseSchema = z.enum(["NORMAL", "ESCALATION"]);
 export const statusSchema = z.enum(["LOBBY", "ROUND_OPEN", "ROUND_LOCKED", "ROUND_REVEALED", "FINISHED"]);
 export const participantStatusSchema = z.enum(["ACTIVE", "ELIMINATED"]);
 export const pSchema = z.enum(["0.8", "2/3", "1/2"]);
-export const roundModeSchema = z.enum(["STANDARD", "WAGER"]);
+export const roundModeSchema = z.enum(["STANDARD", "WAGER", "HOST_TARGET"]);
 export const ruleIdSchema = z.union([z.literal(1), z.literal(2)]);
 export const roomCodeSchema = z.string().regex(/^[A-Z]{4}$/, "Code must contain four uppercase letters.");
 export const uuidSchema = z.string().uuid();
@@ -33,7 +33,7 @@ export const participantSchema = accountSchema.extend({
 }).strict();
 
 export const roundSettingsSchema = z.object({
-  /** STANDARD keeps the original scoring; WAGER also settles the virtual-points pot. */
+  /** STANDARD keeps the original scoring; WAGER adds a fixed-odds virtual-points stake. */
   roundMode: roundModeSchema.default("STANDARD"),
   p: pSchema,
   min: z.literal(0),
@@ -63,7 +63,7 @@ export const roundResultSchema = z.object({
   pointsByUsername: z.record(z.number().int()),
   /** The basic win/loss component actually applied after wager settlement. */
   basePointsByUsername: z.record(z.number().int()).default({}),
-  /** Signed payout-minus-stake component. Empty for a standard round. */
+  /** Signed wager component: +stake for winners and -stake for non-winners. */
   wagerPointsByUsername: z.record(z.number().int()).default({}),
   payoutsByUsername: z.record(z.number().int().nonnegative()).default({}),
   wagerPot: z.number().int().nonnegative().default(0),
@@ -168,6 +168,9 @@ export const playerProjectionSchema = publicProjectionSchema.extend({
 export const hostProjectionSchema = publicProjectionSchema.extend({
   view: z.literal("host"),
   canCancelRoundResult: z.boolean(),
+  /** Secret target values are available only in the authenticated Host projection. */
+  nextHostTarget: z.number().int().min(0).max(100).nullable(),
+  currentHostTarget: z.number().int().min(0).max(100).nullable(),
   hostPicks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), stakePoints: z.number().int().nonnegative() }).strict()).nullable(),
 }).strict();
 
@@ -189,6 +192,7 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
     payload: z.object({
       p: pSchema.optional(),
       roundMode: roundModeSchema.optional(),
+      hostTarget: z.number().int().min(0).max(100).optional(),
       timerSeconds: timerOptionSchema.optional(),
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),

@@ -2,7 +2,7 @@ import type { StateResponse } from "@/contracts";
 import type { Room } from "./model";
 import { individualLeaderboard, teamLeaderboard } from "./model";
 
-function publicSettings<T extends { roundMode?: "STANDARD" | "WAGER" }>(settings: T) {
+function publicSettings<T extends { roundMode?: "STANDARD" | "WAGER" | "HOST_TARGET" }>(settings: T) {
   return { ...settings, roundMode: settings.roundMode ?? "STANDARD" };
 }
 
@@ -89,6 +89,12 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       ...base,
       view,
       canCancelRoundResult,
+      nextHostTarget: (room.run.settingsForNextRound.roundMode ?? "STANDARD") === "HOST_TARGET" && room.run.nextHostTargetTenths != null
+        ? room.run.nextHostTargetTenths / 10
+        : null,
+      currentHostTarget: (round?.settings.roundMode ?? "STANDARD") === "HOST_TARGET" && round?.hostTargetTenths != null
+        ? round.hostTargetTenths / 10
+        : null,
       hostPicks: room.run.status === "ROUND_LOCKED" || room.run.status === "ROUND_REVEALED" || room.run.status === "FINISHED"
         ? Object.entries(round?.picks ?? {}).map(([pickUsername, valueTenths]) => ({ username: pickUsername, valueTenths, stakePoints: round?.stakes?.[pickUsername] ?? 0 }))
         : null,
