@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { roomCodeSchema } from "@/contracts";
 import { bearerToken } from "@/lib/auth/player-session";
 import { project } from "@/lib/room";
-import { apiError, etag } from "@/lib/server/http";
+import { apiError, etag, serverProblem } from "@/lib/server/http";
 import { authenticatePlayer, roomForRead } from "@/lib/server/room-service";
 import { isHostRequest } from "@/lib/auth/host-session";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  try {
+    return await state(request);
+  } catch (error) {
+    return serverProblem(error);
+  }
+}
+
+async function state(request: NextRequest) {
   const codeResult = roomCodeSchema.safeParse(request.nextUrl.searchParams.get("code")?.toUpperCase());
   const requestedView = request.nextUrl.searchParams.get("view") ?? "public";
   if (!codeResult.success || !["public", "player", "host"].includes(requestedView)) {

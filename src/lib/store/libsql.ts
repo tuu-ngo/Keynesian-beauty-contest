@@ -20,8 +20,9 @@ export class LibsqlStore implements RoomStore {
       if ((!url.startsWith("libsql://") && !url.startsWith("https://")) || !process.env.TURSO_AUTH_TOKEN) {
         throw new Error("Production requires a remote libsql:// or https:// TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.");
       }
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-      if (!baseUrl || new URL(baseUrl).protocol !== "https:") throw new Error("Production requires an HTTPS NEXT_PUBLIC_BASE_URL.");
+      // NEXT_PUBLIC_BASE_URL is inlined at build time and only used for links and the
+      // Origin check, which also accepts same-host requests. A missing or http value
+      // must not take the whole API down, so it is no longer checked here.
     }
     if (url.startsWith("file:")) await this.client.execute("PRAGMA journal_mode = WAL");
     await this.client.execute("PRAGMA foreign_keys = ON");
