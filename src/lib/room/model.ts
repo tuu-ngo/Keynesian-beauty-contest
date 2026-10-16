@@ -511,11 +511,13 @@ function score(round: InternalRound, run: Run): RoundResult {
 function cancelRoundResult(run: Run): void {
   const round = currentRound(run)!;
   const result = round.result!;
+  // A player kicked after this reveal no longer has a participant to restore.
   for (const [username, points] of Object.entries(result.pointsByUsername)) {
-    run.participants[username].totalPoints -= points;
+    if (run.participants[username]) run.participants[username].totalPoints -= points;
   }
   for (const username of [...result.pointEliminatedUsernames, result.eliminatedUsername].filter((value): value is string => value !== null)) {
     const participant = run.participants[username];
+    if (!participant) continue;
     participant.status = "ACTIVE";
     participant.eliminatedInRound = null;
   }
@@ -688,6 +690,29 @@ export function applyCommand(room: Room, command: HostCommand, now: number): { r
       run.settingsForNextRound = { ...run.settingsForNextRound, ...settings };
       if (activeRules !== undefined) run.activeRules = ([1, 2] as const).filter((rule) => activeRules.includes(rule));
       syncStartPoints(run);
+      changed = true;
+      break;
+    }
+    case "KICK_PLAYER": {
+      if (run.status === "FINISHED") throw new RoomError("INVALID_TRANSITION", "The game has already finished.");
+      const username = command.username.trim().toLowerCase();
+      if (!run.participants[username] && !next.accounts.some((account) => account.username === username)) {
+        throw new RoomError("VALIDATION_ERROR", "That player is not in this room.");
+      }
+      // Removing the account and its sessions signs the player out and frees the
+      // nickname; revealed rounds keep their results for the record.
+      delete run.participants[username];
+      next.accounts = next.accounts.filter((account) => account.username !== username);
+      for (const [hash, session] of Object.entries(next.sessions)) {
+        if (session.username === username) delete next.sessions[hash];
+      }
+      delete next.pickReceipts[username];
+      const round = currentRound(run);
+      if (round && round.result === null) {
+        delete round.picks[username];
+        if (round.stakes) delete round.stakes[username];
+        round.defaultedUsernames = (round.defaultedUsernames ?? []).filter((name) => name !== username);
+      }
       changed = true;
       break;
     }

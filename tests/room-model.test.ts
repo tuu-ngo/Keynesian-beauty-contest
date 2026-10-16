@@ -803,4 +803,59 @@ describe("room model", () => {
       expect(Object.values(game.run.participants).every((player) => player.status === "ACTIVE")).toBe(true);
     });
   });
+  describe("kick player", () => {
+    function kick(input: Room, username: string): Room {
+      return applyCommand(input, { type: "KICK_PLAYER", commandId: crypto.randomUUID(), expectedVersion: input.version, username }, NOW).room;
+    }
+
+    function withSession(input: Room, username: string): Room {
+      const next = structuredClone(input);
+      next.sessions["hash-" + username] = { tokenHash: "hash-" + username, username, expiresAt: new Date(NOW + 60_000).toISOString(), revokedAt: null };
+      return next;
+    }
+
+    it("removes a lobby player, signs them out and frees the nickname", () => {
+      let game = withSession(joinAll(room()), "cy");
+      game = kick(game, "cy");
+      expect(Object.keys(game.run.participants)).toEqual(["ada", "bea"]);
+      expect(game.accounts.map((account) => account.username)).toEqual(["ada", "bea"]);
+      expect(Object.values(game.sessions).some((session) => session.username === "cy")).toBe(false);
+      expect(project(game, "public", NOW).players.map((player) => player.username)).toEqual(["ada", "bea"]);
+      game = registerPlayer(game, { name: "Cy", now: NOW }).room;
+      expect(game.run.participants.cy).toBeDefined();
+    });
+
+    it("drops the kicked player's pick from an open round so it does not count", () => {
+      let game = command(joinAll(room()), "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries({ ada: 10, bea: 20, cy: 90 })) {
+        game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = kick(game, "cy");
+      expect(game.run.rounds[0].picks).toEqual({ ada: 100, bea: 200 });
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      expect(game.run.rounds[0].result!.average).toBe("15");
+      expect(game.run.rounds[0].result!.winners).toEqual(["ada"]);
+    });
+
+    it("keeps revealed results and can still cancel them after a kick", () => {
+      let game = command(joinAll(room()), "OPEN_ROUND").room;
+      for (const [username, value] of Object.entries({ ada: 10, bea: 20, cy: 90 })) {
+        game = submitPick(game, { username, runId: game.run.id, round: 1, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      game = command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+      const winners = game.run.rounds[0].result!.winners;
+      game = kick(game, winners[0]);
+      expect(game.run.rounds[0].result!.winners).toEqual(winners);
+      game = command(game, "CANCEL_ROUND_RESULT").room;
+      expect(game.run.status).toBe("ROUND_LOCKED");
+    });
+
+    it("rejects unknown players and kicks after the game has finished", () => {
+      const game = joinAll(room());
+      expect(() => kick(game, "nobody")).toThrow("not in this room");
+      const finished = command(command(game, "OPEN_ROUND").room, "FINISH").room;
+      expect(() => kick(finished, "ada")).toThrow("already finished");
+      expect(hostCommandSchema.safeParse({ type: "KICK_PLAYER", commandId: crypto.randomUUID(), expectedVersion: 0 }).success).toBe(false);
+    });
+  });
 });

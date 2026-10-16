@@ -187,6 +187,8 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("START_ESCALATION"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("FINISH"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal("RESET"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative() }).strict(),
+  /** Removes a player from the room: participant, nickname and sessions. Their pick in an unrevealed round is dropped. */
+  z.object({ type: z.literal("KICK_PLAYER"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative(), username: z.string().min(1).max(64) }).strict(),
   z.object({
     type: z.literal("UPDATE_SETTINGS"), commandId: uuidSchema, expectedVersion: z.number().int().nonnegative(),
     payload: z.object({

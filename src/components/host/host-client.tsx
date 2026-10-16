@@ -44,10 +44,13 @@ export function HostClient({ code }: { code: string }) {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingCommand>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const [kickTarget, setKickTarget] = useState<{ username: string; displayName: string } | null>(null);
+  const kickDialog = useRef<HTMLDialogElement>(null);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [exportsOpen, setExportsOpen] = useState(false);
 
   useEffect(() => { if (pending) dialog.current?.showModal(); else dialog.current?.close(); }, [pending]);
+  useEffect(() => { if (kickTarget) kickDialog.current?.showModal(); else kickDialog.current?.close(); }, [kickTarget]);
   const activeRunId = room.data?.runId;
   const activeStatus = room.data?.status;
   useEffect(() => {
@@ -60,20 +63,21 @@ export function HostClient({ code }: { code: string }) {
     if (type === "FINISH" || type === "RESET") { setPending(type); return; }
     await send(type, payload);
   }
-  async function send(type: HostCommand["type"], payload?: SettingsPayload) {
+  async function send(type: HostCommand["type"], payload?: SettingsPayload, username?: string) {
     if (!room.data) return;
     setSubmitting(type); setNotice(""); setNoticeOk(false);
     const base = { type, commandId: crypto.randomUUID(), expectedVersion: room.data.version };
-    const body = type === "UPDATE_SETTINGS" ? { ...base, payload: payload ?? {} } : base;
+    const body = type === "UPDATE_SETTINGS" ? { ...base, payload: payload ?? {} } : type === "KICK_PLAYER" ? { ...base, username } : base;
     try {
       await roomRequest("/api/room/command", { method: "POST", body });
       if (type === "RESET") { setNotice("A new run has started. Players with retained sessions can join the lobby again."); setNoticeOk(true); }
+      if (type === "KICK_PLAYER") { setNotice(`${kickTarget?.displayName ?? username} was removed from the room.`); setNoticeOk(true); }
       await room.refresh();
     } catch (error) {
       if (error instanceof RoomClientError && error.problem.code === "VERSION_CONFLICT") {
         setNotice("Game state changed in another session. The latest state is now shown."); await room.refresh();
       } else setNotice(error instanceof RoomClientError ? error.problem.message : "Command failed. Try again.");
-    } finally { setSubmitting(null); setPending(null); }
+    } finally { setSubmitting(null); setPending(null); setKickTarget(null); }
   }
   async function logout() { await roomRequest("/api/host/logout", { method: "POST" }).catch(() => undefined); window.location.assign("/host"); }
 
@@ -88,11 +92,12 @@ export function HostClient({ code }: { code: string }) {
       </aside>
       <section className="host-live"><header><div><p className="eyeline">Live room</p><h2>{game.status === "ROUND_OPEN" ? `Round ${game.currentRound?.number}` : game.status.replaceAll("_", " ")}</h2></div><p>{game.currentRound ? `${roundModeLabel(game.currentRound.settings.roundMode)} · ` : ""}{game.submittedCount} of {game.activeCount} active players submitted</p></header>
         <LiveLeaderboard game={game} />
-        <RosterByTeam game={game} />
+        <RosterByTeam game={game} busy={submitting !== null} onKick={setKickTarget} />
         <HostRoundDetail game={game} />
       </section>
     </div>
     <dialog className="confirm-dialog" ref={dialog} onCancel={(event) => { event.preventDefault(); setPending(null); }}><form method="dialog"><h2>{pending === "FINISH" ? "Finish this game?" : "Start a new run?"}</h2><p>{pending === "FINISH" ? "This records the current run and stops further rounds." : "This archives the current run and returns every signed-in player to a new lobby."}</p><div><button className="button button--secondary" autoFocus onClick={() => setPending(null)}>Cancel</button><button className="button button--danger" onClick={() => pending && void send(pending)}>{pending === "FINISH" ? "Finish game" : "Start new run"}</button></div></form></dialog>
+    <dialog className="confirm-dialog" ref={kickDialog} onCancel={(event) => { event.preventDefault(); setKickTarget(null); }}><form method="dialog"><h2>Kick {kickTarget?.displayName}?</h2><p>They are signed out and removed from the room, with their points and any unrevealed pick. Results of revealed rounds stay as they are. They can join again with a name only while the room is in the lobby.</p><div><button className="button button--secondary" autoFocus onClick={() => setKickTarget(null)}>Cancel</button><button className="button button--danger" onClick={() => kickTarget && void send("KICK_PLAYER", undefined, kickTarget.username)}>Kick player</button></div></form></dialog>
   </main>;
 }
 
@@ -155,9 +160,9 @@ function LiveLeaderboard({ game }: { game: HostProjection }) {
   </section>;
 }
 
-function RosterByTeam({ game }: { game: HostProjection }) {
+function RosterByTeam({ game, busy, onKick }: { game: HostProjection; busy: boolean; onKick: (player: { username: string; displayName: string }) => void }) {
   const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({});
-  return <section className="roster"><h2>Roster</h2>{game.teams.map((team) => { const people = game.players.filter((player) => player.teamId === team.id); const active = people.filter((player) => player.status === "ACTIVE"); const submitted = active.filter((player) => player.hasSubmitted); const points = people.reduce((sum, player) => sum + player.totalPoints, 0); const expanded = openTeams[team.id] ?? true; return <details key={team.id} open={expanded} onToggle={(event) => setOpenTeams((current) => ({ ...current, [team.id]: (event.target as HTMLDetailsElement).open }))}><summary><span><TeamMark name={team.name} color={team.color} />{team.name}</span><span>{people.length} players · {active.length} active · {submitted.length} submitted · {points} pts</span></summary><ul>{people.map((player) => <li key={player.username}><span>{player.displayName}</span><span>{player.status === "ELIMINATED" ? "Eliminated" : game.status === "ROUND_OPEN" ? player.hasSubmitted ? "Submitted" : "Not submitted" : "Active"} · {player.totalPoints} pts</span></li>)}</ul></details>; })}</section>;
+  return <section className="roster"><h2>Roster</h2>{game.teams.map((team) => { const people = game.players.filter((player) => player.teamId === team.id); const active = people.filter((player) => player.status === "ACTIVE"); const submitted = active.filter((player) => player.hasSubmitted); const points = people.reduce((sum, player) => sum + player.totalPoints, 0); const expanded = openTeams[team.id] ?? true; return <details key={team.id} open={expanded} onToggle={(event) => setOpenTeams((current) => ({ ...current, [team.id]: (event.target as HTMLDetailsElement).open }))}><summary><span><TeamMark name={team.name} color={team.color} />{team.name}</span><span>{people.length} players · {active.length} active · {submitted.length} submitted · {points} pts</span></summary><ul>{people.map((player) => <li key={player.username}><span>{player.displayName}</span><span>{player.status === "ELIMINATED" ? "Eliminated" : game.status === "ROUND_OPEN" ? player.hasSubmitted ? "Submitted" : "Not submitted" : "Active"} · {player.totalPoints} pts</span>{game.status !== "FINISHED" && <button type="button" className="text-button roster-kick" disabled={busy} onClick={() => onKick({ username: player.username, displayName: player.displayName })} aria-label={`Kick ${player.displayName}`}>Kick</button>}</li>)}</ul></details>; })}</section>;
 }
 
 function HostRoundDetail({ game }: { game: HostProjection }) {

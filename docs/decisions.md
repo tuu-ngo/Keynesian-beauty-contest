@@ -57,3 +57,8 @@ Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](c
 - Bỏ việc loại trực tiếp mỗi vòng trong leo thang. Người chơi chỉ bị loại khi điểm về `0`. Điều này thay mục "Trong leo thang vẫn loại đúng một người" ở trên.
 - Luật 2 bật cùng lúc với Luật 1 khi vào leo thang, vì không còn "lần loại đầu tiên" để kích hoạt.
 - Host có thể tick/untick Luật 1 và Luật 2 giữa các vòng (sảnh hoặc sau khi công bố), ở cả vòng thường và leo thang. Lựa chọn áp dụng từ vòng kế. Khi vào leo thang, cả hai luật được bật lại; Host có thể tắt sau đó.
+
+## Kick người chơi
+
+- Host có thể kick người chơi ở mọi trạng thái trừ khi game đã kết thúc. Người bị kick bị đăng xuất, mất điểm của run hiện tại (không còn tính vào đội), và pick chưa công bố bị bỏ khỏi trung bình. Kết quả các vòng đã công bố giữ nguyên.
+- Nickname được giải phóng: người bị kick có thể vào lại bằng tên bất kỳ, nhưng chỉ khi room đang ở sảnh. Không có danh sách chặn trong MVP.

@@ -160,6 +160,7 @@ Máy trạng thái: `LOBBY → ROUND_OPEN → ROUND_LOCKED → ROUND_REVEALED �
 type HostCommand = { commandId: string; expectedVersion: number } & (
   | { type: 'OPEN_ROUND' | 'LOCK_ROUND' | 'REVEAL_ROUND' | 'START_ESCALATION' | 'FINISH' | 'RESET' }
   | { type: 'UPDATE_SETTINGS'; payload: { roundMode?: RoundMode; hostTarget?: number; p?: P; timerSeconds?: 60 | 90 | 120 | null; winPoints?: number; losePoints?: number; startPoints?: number; activeRules?: RuleId[] } }
+  | { type: 'KICK_PLAYER'; username: string }
 );
 ```
 
@@ -172,6 +173,7 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 | `UPDATE_SETTINGS` | `LOBBY` hoặc `ROUND_REVEALED` | Sửa loại vòng, target bí mật (khi dùng), `p`, timer và cấu hình điểm cho vòng kế. Vòng đã mở giữ nguyên settings/target snapshot. |
 | `FINISH` | Room chưa `FINISHED` | Chốt run sớm, tạo bản export/retention. |
 | `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới, xóa vòng/điểm/loại/participant của run; giữ room code, roster và các session hợp lệ. |
+| `KICK_PLAYER` | Mọi trạng thái trừ `FINISHED` | Xóa participant khỏi run, xóa account (nickname được giải phóng) và mọi session của người đó; pick/stake của vòng chưa công bố bị bỏ. Kết quả các vòng đã công bố giữ nguyên. Username không tồn tại → `400 VALIDATION_ERROR`. |
 
 - Chỉ participant `ACTIVE` được gửi. Client gửi `value` ở bước `0.1`; server từ chối ngoài `0..100`, sai bước, sai vòng hoặc sau deadline/lock, không tự làm tròn. Gửi lại trước lock thay thế lựa chọn cũ. Cùng request id lặp lại là idempotent.
 - Sau reset, token Player cũ vẫn xác thực account nhưng account phải vào sảnh của `runId` mới để thành participant. App đang mở tự gọi lệnh join cho run mới; account offline không tự được tính. `join` sau khi mở vòng 1 chỉ hợp lệ với participant đã nằm trong run đó (để khôi phục phiên), không thêm người mới.
