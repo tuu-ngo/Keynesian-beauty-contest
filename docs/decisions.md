@@ -16,7 +16,7 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 ## Dữ liệu và vận hành
 
 - `db/seed.sql` chỉ chứa danh sách đội có thể sửa. Chạy `npm run seed-db` trước khi tạo room. Host tạo room sẽ snapshot các đội này, nên sửa seed sau đó không đổi room hiện có. Team có `id`, `name`, `image?`, `color?`.
-- Người chơi **không đăng nhập**, vào giống Kahoot: nhập mã room + nickname là chơi. Server cấp player token lưu trong `localStorage` và tự gán đội (đội ít người nhất). Nickname duy nhất trong room. Chỉ Host có tài khoản. Người mất token không thể nhận lại nickname cũ.
+- Người chơi **không đăng nhập**, vào giống Kahoot: nhập mã room + nickname là chơi. Server cấp player token lưu trong `localStorage` và tự gán đội (đội ít người nhất). Nickname duy nhất trong run hiện tại. Chỉ Host có tài khoản. Người mất token không thể nhận lại nickname cũ cho tới khi Host mở run mới.
 - Chỉ có một tài khoản Host, khai báo trong `.env` ở dev và Environment Variables của Vercel ở production. Các thao tác tạo room, điều khiển và reset cần phiên Host hợp lệ.
 - Production lưu trạng thái sống trong **Turso/libSQL** (SQLite-compatible, remote qua HTTP) được kết nối với Vercel. Không dùng file SQLite cục bộ trong Vercel Function vì filesystem của Function không bền vững và không được chia sẻ giữa các instance. Dev dùng file SQLite cục bộ `db/keynesian-beauty-contest.dev.db`; file này không commit nhưng được giữ qua lần khởi động lại dev server.
 - Client polling trạng thái mỗi 1 giây qua API có `version`/`ETag`; không dùng WebSocket cho MVP. Portal và Host luôn polling khi mở; Player có thể tạm dừng khi tab ẩn và đồng bộ lại khi hiện.
@@ -24,7 +24,7 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 
 ## Quyết định giao diện/contract khi triển khai
 
-- Reset giữ `code`, dữ liệu đội/tài khoản đã snapshot và phiên đăng nhập; xóa vòng, điểm, trạng thái loại và danh sách tham gia của run cũ. Người chơi đang mở app có thể vào lại sảnh run mới mà không nhập lại mật khẩu; khi mở vòng đầu tiên, danh sách tham gia mới được khóa lại.
+- Reset giữ `code` và danh sách đội; xóa vòng, điểm, trạng thái loại, danh sách tham gia, mọi account và phiên của người chơi. Mọi người chơi bị đăng xuất và vào sảnh run mới bằng cách nhập lại tên (có thể dùng lại tên cũ); khi mở vòng đầu tiên, danh sách tham gia mới được khóa lại. Khi run kết thúc (FINISHED), phiên vẫn còn để người chơi xem kết quả cuối; việc kick xảy ra lúc Host mở run mới.
 - Điểm đội là tổng điểm cá nhân, kể cả điểm của người đã bị loại. Nếu bằng điểm, các đội đồng hạng. Người thắng cá nhân cuối cùng trong leo thang là người sống sót cuối; bảng điểm vẫn được hiển thị riêng.
 - Host dùng cookie phiên `HttpOnly` được ký bằng secret môi trường; Player dùng token ngẫu nhiên để khôi phục phiên. Mật khẩu và token không xuất hiện trong projection của Portal.
 

@@ -79,7 +79,7 @@ export interface Room {
   code: string;
   version: number;
   teams: Team[];
-  /** Everyone who has joined this room by name, kept across runs so tokens survive RESET. */
+  /** Everyone who has joined the current run by name. RESET clears them with their sessions. */
   accounts: Account[];
   run: Run;
   sessions: Record<string, PlayerSession>;
@@ -728,6 +728,11 @@ export function applyCommand(room: Room, command: HostCommand, now: number): { r
     case "RESET": {
       archive(next, "RESET", now);
       next.run = newRun(run.number + 1, now);
+      // Every player of the old game is removed: nicknames are freed and tokens
+      // stop working, so everyone joins the new lobby fresh by name. Keeping them
+      // made a returning player's own name show as already taken.
+      next.accounts = [];
+      next.sessions = {};
       // Receipts from the finished run can no longer apply; this command's own
       // receipt is recorded below so a retried RESET stays idempotent.
       next.commandReceipts = {};

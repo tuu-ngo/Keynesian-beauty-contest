@@ -8,7 +8,7 @@
 |---|---|
 | `room` | Room duy nhất của ứng dụng; có `code` 4 chữ cái, roster snapshot và các run. Reset không tạo room mới. |
 | `run` | Một lần chơi từ Lobby đến Finish hoặc Reset, có `runId` riêng. Các vòng, điểm và trạng thái loại thuộc run. |
-| `account` | Danh tính người chơi tạo khi nhập nickname + mã room (kiểu Kahoot): `username` (nickname chuẩn hóa, lowercase), `displayName`, `teamId` (server tự gán). Không có mật khẩu; chỉ Host đăng nhập. Nickname là duy nhất trong room (qua mọi run). |
+| `account` | Danh tính người chơi tạo khi nhập nickname + mã room (kiểu Kahoot): `username` (nickname chuẩn hóa, lowercase), `displayName`, `teamId` (server tự gán). Không có mật khẩu; chỉ Host đăng nhập. Nickname là duy nhất trong run hiện tại; RESET xóa mọi account nên tên được dùng lại ở run mới. |
 | `participant` | Account đã vào room trước khi vòng 1 của run mở. Danh sách participant bị khóa khi mở vòng 1. |
 | `active` | Participant chưa bị loại. Mất kết nối không đổi trạng thái này. |
 | `pick` | Lựa chọn cuối cùng của participant trong một vòng, số nguyên `0..1000` biểu diễn bước `0.1`. |
@@ -26,7 +26,7 @@ Một team có `id`, `name`, `image?`, `color?`.
 - `image`, `color` tùy chọn. `image` chỉ trỏ tới asset tĩnh trong `public/teams/`. Khi không có ảnh, UI hiện tên/màu dự phòng.
 - `id` đội duy nhất (không phân biệt hoa thường). Từ chối seed không có đội khi tạo room.
 - Nickname: loại thẻ HTML/ký tự điều khiển, gộp khoảng trắng, trim, dài 1–20 ký tự; `username` = nickname chuẩn hóa dạng lowercase, duy nhất trong room. Server tự gán người chơi vào đội đang ít account nhất (hòa thì lấy đội đứng trước). Tối đa 200 account mỗi room.
-- Khi tạo room, server snapshot danh sách đội vào store. Sửa file rồi deploy lại không thay đổi room đã có. Reset giữ đội và account.
+- Khi tạo room, server snapshot danh sách đội vào store. Sửa file rồi deploy lại không thay đổi room đã có. Reset giữ đội, xóa mọi account và session.
 - `db/keynesian-beauty-contest.dev.db` là SQLite database runtime trong dev, được gitignore và được migrate/kiểm tra schema khi server dev khởi động. Chỉ hỗ trợ một process dev ghi file.
 
 ## 3. Kiểu dữ liệu dùng chung
@@ -172,7 +172,7 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 | `START_ESCALATION` | `NORMAL`, sau một vòng `ROUND_REVEALED` | Đặt phase B và bật Rule 1, Rule 2 cho vòng kế; `escalationReason='HOST'`. |
 | `UPDATE_SETTINGS` | `LOBBY` hoặc `ROUND_REVEALED` | Sửa loại vòng, target bí mật (khi dùng), `p`, timer và cấu hình điểm cho vòng kế. Vòng đã mở giữ nguyên settings/target snapshot. |
 | `FINISH` | Room chưa `FINISHED` | Chốt run sớm, tạo bản export/retention. |
-| `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới, xóa vòng/điểm/loại/participant của run; giữ room code, roster và các session hợp lệ. |
+| `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới, xóa vòng/điểm/loại/participant của run; giữ room code và danh sách đội. Mọi account và session bị xóa (người chơi bị đăng xuất, nickname được giải phóng); người chơi vào sảnh run mới bằng cách nhập lại tên. |
 | `KICK_PLAYER` | Mọi trạng thái trừ `FINISHED` | Xóa participant khỏi run, xóa account (nickname được giải phóng) và mọi session của người đó; pick/stake của vòng chưa công bố bị bỏ. Kết quả các vòng đã công bố giữ nguyên. Username không tồn tại → `400 VALIDATION_ERROR`. |
 
 - Chỉ participant `ACTIVE` được gửi. Client gửi `value` ở bước `0.1`; server từ chối ngoài `0..100`, sai bước, sai vòng hoặc sau deadline/lock, không tự làm tròn. Gửi lại trước lock thay thế lựa chọn cũ. Cùng request id lặp lại là idempotent.

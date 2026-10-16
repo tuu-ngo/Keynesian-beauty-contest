@@ -858,4 +858,17 @@ describe("room model", () => {
       expect(hostCommandSchema.safeParse({ type: "KICK_PLAYER", commandId: crypto.randomUUID(), expectedVersion: 0 }).success).toBe(false);
     });
   });
+  describe("new run", () => {
+    it("signs every player out and frees their nicknames so the same names can join again", () => {
+      let game = joinAll(room());
+      game.sessions.ada = { tokenHash: "ada", username: "ada", expiresAt: new Date(NOW + 60_000).toISOString(), revokedAt: null };
+      game = command(command(command(game, "OPEN_ROUND").room, "FINISH").room, "RESET").room;
+      expect(game.run.status).toBe("LOBBY");
+      expect(game.accounts).toEqual([]);
+      expect(game.sessions).toEqual({});
+      expect(game.archives).toHaveLength(1);
+      game = joinAll(game);
+      expect(Object.keys(game.run.participants)).toEqual(["ada", "bea", "cy"]);
+    });
+  });
 });

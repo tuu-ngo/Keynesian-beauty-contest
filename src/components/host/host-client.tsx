@@ -70,7 +70,7 @@ export function HostClient({ code }: { code: string }) {
     const body = type === "UPDATE_SETTINGS" ? { ...base, payload: payload ?? {} } : type === "KICK_PLAYER" ? { ...base, username } : base;
     try {
       await roomRequest("/api/room/command", { method: "POST", body });
-      if (type === "RESET") { setNotice("A new run has started. Players with retained sessions can join the lobby again."); setNoticeOk(true); }
+      if (type === "RESET") { setNotice("A new run has started. Every player was signed out and joins again with a name."); setNoticeOk(true); }
       if (type === "KICK_PLAYER") { setNotice(`${kickTarget?.displayName ?? username} was removed from the room.`); setNoticeOk(true); }
       await room.refresh();
     } catch (error) {
@@ -96,7 +96,7 @@ export function HostClient({ code }: { code: string }) {
         <HostRoundDetail game={game} />
       </section>
     </div>
-    <dialog className="confirm-dialog" ref={dialog} onCancel={(event) => { event.preventDefault(); setPending(null); }}><form method="dialog"><h2>{pending === "FINISH" ? "Finish this game?" : "Start a new run?"}</h2><p>{pending === "FINISH" ? "This records the current run and stops further rounds." : "This archives the current run and returns every signed-in player to a new lobby."}</p><div><button className="button button--secondary" autoFocus onClick={() => setPending(null)}>Cancel</button><button className="button button--danger" onClick={() => pending && void send(pending)}>{pending === "FINISH" ? "Finish game" : "Start new run"}</button></div></form></dialog>
+    <dialog className="confirm-dialog" ref={dialog} onCancel={(event) => { event.preventDefault(); setPending(null); }}><form method="dialog"><h2>{pending === "FINISH" ? "Finish this game?" : "Start a new run?"}</h2><p>{pending === "FINISH" ? "This records the current run and stops further rounds." : "This archives the current run and signs every player out. They join the new lobby again with a name."}</p><div><button className="button button--secondary" autoFocus onClick={() => setPending(null)}>Cancel</button><button className="button button--danger" onClick={() => pending && void send(pending)}>{pending === "FINISH" ? "Finish game" : "Start new run"}</button></div></form></dialog>
     <dialog className="confirm-dialog" ref={kickDialog} onCancel={(event) => { event.preventDefault(); setKickTarget(null); }}><form method="dialog"><h2>Kick {kickTarget?.displayName}?</h2><p>They are signed out and removed from the room, with their points and any unrevealed pick. Results of revealed rounds stay as they are. They can join again with a name only while the room is in the lobby.</p><div><button className="button button--secondary" autoFocus onClick={() => setKickTarget(null)}>Cancel</button><button className="button button--danger" onClick={() => kickTarget && void send("KICK_PLAYER", undefined, kickTarget.username)}>Kick player</button></div></form></dialog>
   </main>;
 }
