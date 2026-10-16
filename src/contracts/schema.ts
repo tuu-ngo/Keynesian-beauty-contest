@@ -45,7 +45,7 @@ export const roundSettingsSchema = z.object({
   winPoints: z.number().int().min(0).max(1000).default(10),
   losePoints: z.number().int().min(0).max(1000).default(0),
   /** Points every player starts the run with; a player whose total reaches 0 is eliminated. 0 turns this off. */
-  startPoints: z.number().int().min(0).max(100000).default(100),
+  startPoints: z.number().int().min(0).max(100000).default(150),
 }).strict();
 
 export const timerOptionSchema = z.union([z.literal(60), z.literal(90), z.literal(120)]).nullable();
@@ -99,7 +99,7 @@ export const revealedRoundSchema = z.object({
   settings: roundSettingsSchema,
   average: z.string().nullable(),
   target: z.string().nullable(),
-  picks: z.array(z.object({ valueTenths: z.number().int().min(0).max(1000) }).strict()),
+  picks: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), defaulted: z.boolean() }).strict()),
   winners: z.array(z.object({ username: z.string(), valueTenths: z.number().int().min(0).max(1000), points: z.number().int().nonnegative() }).strict()),
   eliminatedUsername: z.string().nullable(),
   pointsByUsername: z.record(z.number().int()).default({}),

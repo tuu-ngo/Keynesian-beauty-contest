@@ -112,7 +112,7 @@ type PublicPlayer = {
   eliminatedInRound: number | null; totalPoints: number;
   finalPlacement: number | null; // survival order in escalation; score rank when Host finishes early
 };
-type RevealedPick = { valueTenths: number }; // anonymous; winners named separately
+type RevealedPick = { username: string; valueTenths: number; defaulted: boolean }; // revealed only after the round result; defaulted picks were filled at lock
 type RevealedRound = {
   number: number; settings: RoundSettings; average: string | null;
   target: string | null; picks: RevealedPick[];
@@ -203,7 +203,7 @@ Mọi body được validate runtime; lỗi chuẩn `{ "error": { "code": "...",
 
 `GET state` dùng cùng path với `view` tường minh để Portal luôn nhận public projection, kể cả khi cùng trình duyệt có cookie Host. `view` là yêu cầu về dữ liệu, không phải bằng chứng xác thực. Response có `version`, `serverNow`, `runId`, `status`, `phase`, `teams`, tiến độ, bảng điểm, dữ liệu theo trạng thái. Cụ thể:
 
-- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Target bí mật của Host cũng không nằm trong settings hay projection trước reveal. Sau reveal chỉ có pick của vòng đã công bố và dữ liệu tổng hợp. Không có token.
+- **Portal/public:** tên và đội participant, cờ đã gửi, tổng số; không có pick/average/target trước `ROUND_REVEALED`. Target bí mật của Host cũng không nằm trong settings hay projection trước reveal. Sau reveal có pick gắn với username và cờ lựa chọn mặc định của từng người trong các vòng đã công bố, cùng dữ liệu tổng hợp. Không có token.
 - **Player:** PublicProjection cộng pick hiện tại của chính mình và trạng thái riêng. Không có pick của người khác trước reveal.
 - **Host:** danh sách đã/chưa gửi khi vòng mở; chỉ thấy pick của người khác sau `ROUND_LOCKED`; có `nextHostTarget` và `currentHostTarget` để quản lý target bí mật; có thể xem archive qua endpoint Host riêng.
 - Mỗi trạng thái ứng với `ETag: "<version>-<projection-role>-<runId>"`; 304 chỉ sau khi xác thực role và kiểm tra version. Poll mỗi 1 giây, thêm jitter nhỏ và tránh request chồng. Client refetch ngay khi tab hiện lại hoặc mạng phục hồi. Nếu dữ liệu run FINISHED đã hết hạn mà room shell còn, API trả `410 RUN_EXPIRED`; Portal hiển thị thông báo thay vì trang trắng, Host vẫn có thể RESET.

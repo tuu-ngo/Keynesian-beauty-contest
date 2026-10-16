@@ -68,7 +68,11 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       settings: publicSettings(candidate.settings),
       average: candidate.result!.average,
       target: candidate.result!.target,
-      picks: Object.values(candidate.picks).map((valueTenths) => ({ valueTenths })),
+      picks: Object.entries(candidate.picks).map(([pickUsername, valueTenths]) => ({
+        username: pickUsername,
+        valueTenths,
+        defaulted: (candidate.defaultedUsernames ?? []).includes(pickUsername),
+      })),
       winners: candidate.result!.winners.map((winner) => ({ username: winner, valueTenths: candidate.picks[winner], points: candidate.result!.pointsByUsername[winner] ?? 0 })),
       eliminatedUsername: candidate.result!.eliminatedUsername,
       pointEliminatedUsernames: candidate.result!.pointEliminatedUsernames ?? [],

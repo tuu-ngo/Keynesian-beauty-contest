@@ -69,6 +69,24 @@ describe("room model", () => {
     expect(lockedPublic.players.filter((player) => player.hasSubmitted)).toHaveLength(3);
   });
 
+  it("reveals each player's result only after reveal, including an applied default", () => {
+    let game = joinAll(room());
+    game = command(game, "OPEN_ROUND").room;
+    game = submitPick(game, { username: "ada", runId: game.run.id, round: 1, value: 13, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = submitPick(game, { username: "bea", runId: game.run.id, round: 1, value: 20, requestId: crypto.randomUUID(), now: NOW }).room;
+    game = command(game, "LOCK_ROUND").room;
+    expect(project(game, "public", NOW).revealedRounds).toEqual([]);
+
+    game = command(game, "REVEAL_ROUND").room;
+    const result = project(game, "public", NOW).revealedRounds[0];
+    expect(stateResponseSchema.safeParse(project(game, "public", NOW)).success).toBe(true);
+    expect(result.picks).toEqual([
+      { username: "ada", valueTenths: 130, defaulted: false },
+      { username: "bea", valueTenths: 200, defaulted: false },
+      { username: "cy", valueTenths: 500, defaulted: true },
+    ]);
+  });
+
   it("scores exact fractional targets, records command receipts, and only reveals after lock", () => {
     let game = joinAll(room());
     game.run.settingsForNextRound.p = "2/3";
