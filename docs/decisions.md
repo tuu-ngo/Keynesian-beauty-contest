@@ -65,8 +65,8 @@ Những quy tắc và hình thức API chi tiết nằm trong [`contracts.md`](c
 
 ## Chế độ Team escape (chọn người thua)
 
-- Host bật ở sảnh, giữ nguyên cho cả game. Mục đích là chọn ra **một team thua**; mỗi team có thể chỉ có một người.
-- Mỗi vòng, team có ít nhất một người thắng được cộng `winPoints` (mặc định 10) **một lần**, dù có mấy người thắng. Điểm team tính riêng, bắt đầu từ 0.
-- Team đạt `escapePoints` (mặc định 100) sau một vòng thắng thì **thoát**: thành viên chuyển sang `ESCAPED`, ngừng chọn số và không tính vào trung bình nữa.
-- Nếu mọi team còn lại cùng đạt mốc trong một vòng thì không team nào thoát vòng đó; chơi tiếp tới khi chỉ một team thắng.
-- Còn đúng một team thì game kết thúc, team đó là team thua. Chế độ này tắt loại cá nhân khi điểm cá nhân về 0.
+- Host bật ở sảnh, giữ nguyên cho cả game. Mục đích là chọn ra **một người thua**. Mỗi người chơi là một "team" riêng, không phụ thuộc danh sách đội trong seed.
+- Mỗi vòng, người thắng được cộng `winPoints` (mặc định 10) vào điểm thoát riêng, bắt đầu từ 0.
+- Người thắng đạt `escapePoints` (mặc định 100) thì **thoát**: chuyển sang `ESCAPED`, ngừng chọn số và không tính vào trung bình nữa.
+- Nếu mọi người còn lại cùng đạt mốc trong một vòng thì không ai thoát vòng đó; chơi tiếp tới khi chỉ một người thắng.
+- Còn đúng một người thì game kết thúc, người đó thua. Chế độ này tắt loại cá nhân khi điểm cá nhân về 0.

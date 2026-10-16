@@ -1,6 +1,6 @@
 import type { StateResponse } from "@/contracts";
 import type { Room } from "./model";
-import { individualLeaderboard, remainingTeamIds, teamEscapeEnabled, teamLeaderboard } from "./model";
+import { individualLeaderboard, teamEscapeEnabled, teamLeaderboard } from "./model";
 
 // Snapshots saved before a setting existed lack it; fill the same defaults the schema uses.
 function publicSettings<T extends { roundMode?: "STANDARD" | "WAGER" | "HOST_TARGET"; teamEscape?: boolean; escapePoints?: number }>(settings: T) {
@@ -12,16 +12,15 @@ function teamEscapeState(room: Room) {
   const run = room.run;
   const settings = run.rounds[0]?.settings ?? run.settingsForNextRound;
   const players = Object.values(run.participants);
-  const playing = new Set(players.map((participant) => participant.teamId));
-  const remaining = remainingTeamIds(run);
+  const remaining = players.filter((participant) => participant.status === "ACTIVE");
   return {
     escapePoints: settings.escapePoints ?? 100,
-    teams: room.teams.filter((team) => playing.has(team.id)).map((team) => ({
-      teamId: team.id,
-      points: run.teamPoints?.[team.id] ?? 0,
-      escapedInRound: players.find((participant) => participant.teamId === team.id && participant.status === "ESCAPED")?.eliminatedInRound ?? null,
+    players: players.map((participant) => ({
+      username: participant.username,
+      points: run.escapeScores?.[participant.username] ?? 0,
+      escapedInRound: participant.status === "ESCAPED" ? participant.eliminatedInRound : null,
     })),
-    losingTeamId: run.status === "FINISHED" && run.finishedBy === "REVEAL" && remaining.length === 1 ? remaining[0] : null,
+    losingUsername: run.status === "FINISHED" && run.finishedBy === "REVEAL" && remaining.length === 1 ? remaining[0].username : null,
   };
 }
 
@@ -95,8 +94,8 @@ export function project(room: Room, view: "public" | "player" | "host", now: num
       winners: candidate.result!.winners.map((winner) => ({ username: winner, valueTenths: candidate.picks[winner], points: candidate.result!.pointsByUsername[winner] ?? 0 })),
       eliminatedUsername: candidate.result!.eliminatedUsername,
       pointEliminatedUsernames: candidate.result!.pointEliminatedUsernames ?? [],
-      teamPointsByTeamId: candidate.result!.teamPointsByTeamId ?? {},
-      escapedTeamIds: candidate.result!.escapedTeamIds ?? [],
+      escapePointsByUsername: candidate.result!.escapePointsByUsername ?? {},
+      escapedUsernames: candidate.result!.escapedUsernames ?? [],
       pointsByUsername: candidate.result!.pointsByUsername,
       basePointsByUsername: candidate.result!.basePointsByUsername ?? candidate.result!.pointsByUsername,
       wagerPointsByUsername: candidate.result!.wagerPointsByUsername ?? {},

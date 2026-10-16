@@ -15,13 +15,13 @@ export function multiplier(p: RoundSettings["p"]) {
   return p === "0.8" ? "80%" : p === "2/3" ? "2/3" : "1/2";
 }
 
-/** Team escape mode: who escaped in this round, and the losing team once the run is over. */
-export function teamEscapeNotice(game: Pick<PublicProjection, "teams" | "teamEscape">, escapedTeamIds: string[] = []): string | null {
+/** Team escape mode: who escaped in this round, and the losing player once the run is over. */
+export function teamEscapeNotice(game: Pick<PublicProjection, "players" | "teamEscape">, escapedUsernames: string[] = []): string | null {
   if (!game.teamEscape) return null;
-  const name = (teamId: string) => game.teams.find((team) => team.id === teamId)?.name ?? teamId;
+  const name = (username: string) => game.players.find((player) => player.username === username)?.displayName ?? username;
   const parts: string[] = [];
-  if (escapedTeamIds.length) parts.push(`${escapedTeamIds.map(name).join(", ")} reached ${game.teamEscape.escapePoints} points and escaped.`);
-  if (game.teamEscape.losingTeamId) parts.push(`${name(game.teamEscape.losingTeamId)} is the last team left and loses.`);
+  if (escapedUsernames.length) parts.push(`${escapedUsernames.map(name).join(", ")} reached ${game.teamEscape.escapePoints} points and escaped.`);
+  if (game.teamEscape.losingUsername) parts.push(`${name(game.teamEscape.losingUsername)} is the last one left and loses.`);
   return parts.length ? parts.join(" ") : null;
 }
 

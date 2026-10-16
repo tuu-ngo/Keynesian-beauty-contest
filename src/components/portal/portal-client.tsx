@@ -124,7 +124,7 @@ function Reveal({ game }: { game: PublicProjection }) {
   if (!result) return <section className="portal-stage portal-error"><h1>Preparing the result</h1></section>;
   const rows = buildRoundResultRows(game, result);
   const featuredRows = rows.filter((row) => row.pick).slice(0, 5);
-  const teamNotice = teamEscapeNotice(game, result.escapedTeamIds);
+  const teamNotice = teamEscapeNotice(game, result.escapedUsernames);
   const hasNotice = Boolean(result.eliminatedUsername || game.escalationReason || teamNotice);
   return <section className={`portal-stage portal-reveal ${hasNotice ? "portal-reveal--notice" : ""}`}>
     <header className="round-result-header">
