@@ -5,7 +5,8 @@ export const SCHEMA_VERSION = 1 as const;
 
 export const phaseSchema = z.enum(["NORMAL", "ESCALATION"]);
 export const statusSchema = z.enum(["LOBBY", "ROUND_OPEN", "ROUND_LOCKED", "ROUND_REVEALED", "FINISHED"]);
-export const participantStatusSchema = z.enum(["ACTIVE", "ELIMINATED"]);
+/** ESCAPED: the player's team reached the escape score in team escape mode and stopped playing. */
+export const participantStatusSchema = z.enum(["ACTIVE", "ELIMINATED", "ESCAPED"]);
 export const pSchema = z.enum(["0.8", "2/3", "1/2"]);
 export const roundModeSchema = z.enum(["STANDARD", "WAGER", "HOST_TARGET"]);
 export const ruleIdSchema = z.union([z.literal(1), z.literal(2)]);
@@ -46,6 +47,9 @@ export const roundSettingsSchema = z.object({
   losePoints: z.number().int().min(0).max(1000).default(0),
   /** Points every player starts the run with; a player whose total reaches 0 is eliminated. 0 turns this off. */
   startPoints: z.number().int().min(0).max(100000).default(150),
+  /** Team escape mode (whole run): a team that wins a round earns winPoints once; at escapePoints it escapes. The last team left loses. */
+  teamEscape: z.boolean().default(false),
+  escapePoints: z.number().int().min(1).max(100000).default(100),
 }).strict();
 
 export const timerOptionSchema = z.union([z.literal(60), z.literal(90), z.literal(120)]).nullable();
@@ -68,6 +72,9 @@ export const roundResultSchema = z.object({
   payoutsByUsername: z.record(z.number().int().nonnegative()).default({}),
   wagerPot: z.number().int().nonnegative().default(0),
   wagerRefunded: z.boolean().default(false),
+  /** Team escape mode: points each team earned this round, and the teams that escaped. */
+  teamPointsByTeamId: z.record(z.number().int()).default({}),
+  escapedTeamIds: z.array(z.string()).default([]),
 }).strict();
 
 export const roundSchema = z.object({
@@ -110,6 +117,15 @@ export const revealedRoundSchema = z.object({
   wagerPot: z.number().int().nonnegative().default(0),
   wagerRefunded: z.boolean().default(false),
   pointEliminatedUsernames: z.array(z.string()).default([]),
+  teamPointsByTeamId: z.record(z.number().int()).default({}),
+  escapedTeamIds: z.array(z.string()).default([]),
+}).strict();
+
+export const teamEscapeStateSchema = z.object({
+  escapePoints: z.number().int().positive(),
+  teams: z.array(z.object({ teamId: z.string(), points: z.number().int().nonnegative(), escapedInRound: z.number().int().positive().nullable() }).strict()),
+  /** Set once the run has finished with exactly one team left. */
+  losingTeamId: z.string().nullable(),
 }).strict();
 
 export const leaderboardRowSchema = z.object({
@@ -151,6 +167,8 @@ export const publicProjectionSchema = z.object({
   revealedRounds: z.array(revealedRoundSchema),
   individualLeaderboard: z.array(leaderboardRowSchema),
   teamLeaderboard: z.array(teamLeaderboardRowSchema),
+  /** Null unless the run plays in team escape mode. */
+  teamEscape: teamEscapeStateSchema.nullable(),
 }).strict();
 
 export const playerProjectionSchema = publicProjectionSchema.extend({
@@ -199,6 +217,9 @@ export const hostCommandSchema = z.discriminatedUnion("type", [
       winPoints: z.number().int().min(0).max(1000).optional(),
       losePoints: z.number().int().min(0).max(1000).optional(),
       startPoints: z.number().int().min(0).max(100000).optional(),
+      /** Lobby only: team escape mode and the score a team needs to escape. */
+      teamEscape: z.boolean().optional(),
+      escapePoints: z.number().int().min(1).max(100000).optional(),
       /** Rules the Host ticks for the rest of the run, from the next round. Escalation turns both on. */
       activeRules: z.array(ruleIdSchema).max(2).optional(),
     }).strict(),

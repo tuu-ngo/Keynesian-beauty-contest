@@ -882,4 +882,88 @@ describe("room model", () => {
       expect(other.room.code).toBe("WXYZ");
     });
   });
+  describe("team escape mode", () => {
+    function teamRoom(teamIds: string[], names: string[]): Room {
+      let game = createRoom({ code: "TEST", teams: teamIds.map((id) => ({ id, name: id.toUpperCase() })), now: NOW });
+      for (const name of names) game = registerPlayer(game, { name, now: NOW }).room;
+      return game;
+    }
+
+    function play(input: Room, picks: Record<string, number>): Room {
+      let game = command(input, "OPEN_ROUND").room;
+      const round = game.run.rounds.at(-1)!.number;
+      for (const [username, value] of Object.entries(picks)) {
+        game = submitPick(game, { username, runId: game.run.id, round, value, requestId: crypto.randomUUID(), now: NOW }).room;
+      }
+      return command(command(game, "LOCK_ROUND").room, "REVEAL_ROUND").room;
+    }
+
+    it("lets winning teams escape at the threshold until the last team loses", () => {
+      let game = settings(teamRoom(["a", "b", "c"], ["Ada", "Bea", "Cy"]), { teamEscape: true, escapePoints: 20, winPoints: 10 });
+      // Target 48 each time Ada picks 40 against two 70s.
+      game = play(game, { ada: 40, bea: 70, cy: 70 });
+      expect(game.run.teamPoints).toEqual({ a: 10 });
+      game = play(game, { ada: 40, bea: 70, cy: 70 });
+      expect(game.run.rounds[1].result!.escapedTeamIds).toEqual(["a"]);
+      expect(game.run.participants.ada).toMatchObject({ status: "ESCAPED", eliminatedInRound: 2 });
+      expect(game.run.status).toBe("ROUND_REVEALED");
+
+      // Ada no longer plays; target 44 makes Bea's 40 the winner.
+      game = play(game, { bea: 40, cy: 70 });
+      game = play(game, { bea: 40, cy: 70 });
+      expect(game.run.status).toBe("FINISHED");
+      const state = project(game, "public", NOW);
+      expect(stateResponseSchema.safeParse(state).success).toBe(true);
+      expect(state.teamEscape).toEqual({
+        escapePoints: 20,
+        teams: [{ teamId: "a", points: 20, escapedInRound: 2 }, { teamId: "b", points: 20, escapedInRound: 4 }, { teamId: "c", points: 0, escapedInRound: null }],
+        losingTeamId: "c",
+      });
+      expect(state.teamLeaderboard.map((row) => [row.teamId, row.points])).toEqual([["a", 20], ["b", 20], ["c", 0]]);
+    });
+
+    it("gives a team the win points once however many of its players win, without individual elimination", () => {
+      let game = settings(joinAll(room()), { teamEscape: true, startPoints: 10, losePoints: 10 });
+      // Ada and Cy (team red) tie on 30 against Bea's 90; target 40.
+      game = play(game, { ada: 30, bea: 90, cy: 30 });
+      expect(game.run.rounds[0].result!.winners).toEqual(["ada", "cy"]);
+      expect(game.run.teamPoints).toEqual({ red: 10 });
+      expect(game.run.participants.bea).toMatchObject({ totalPoints: 0, status: "ACTIVE" });
+    });
+
+    it("lets nobody escape when every remaining team would, then plays on", () => {
+      let game = settings(teamRoom(["a", "b"], ["Ada", "Bea"]), { teamEscape: true, escapePoints: 10 });
+      game = play(game, { ada: 30, bea: 30 });
+      expect(game.run.teamPoints).toEqual({ a: 10, b: 10 });
+      expect(game.run.rounds[0].result!.escapedTeamIds).toEqual([]);
+      expect(game.run.status).toBe("ROUND_REVEALED");
+      game = play(game, { ada: 10, bea: 50 });
+      expect(game.run.rounds[1].result!.escapedTeamIds).toEqual(["a"]);
+      expect(game.run.status).toBe("FINISHED");
+      expect(project(game, "public", NOW).teamEscape?.losingTeamId).toBe("b");
+    });
+
+    it("undoes team points and an escape when the host cancels the result", () => {
+      let game = settings(teamRoom(["a", "b", "c"], ["Ada", "Bea", "Cy"]), { teamEscape: true, escapePoints: 10 });
+      game = play(game, { ada: 40, bea: 70, cy: 70 });
+      expect(game.run.participants.ada.status).toBe("ESCAPED");
+      game = command(game, "CANCEL_ROUND_RESULT").room;
+      expect(game.run.teamPoints).toEqual({ a: 0 });
+      expect(game.run.participants.ada).toMatchObject({ status: "ACTIVE", eliminatedInRound: null });
+    });
+
+    it("needs players in at least two teams before a round can open", () => {
+      const game = settings(teamRoom(["a", "b"], ["Ada"]), { teamEscape: true });
+      const together = settings(registerPlayer(teamRoom(["a"], ["Ada"]), { name: "Bea", now: NOW }).room, { teamEscape: true });
+      expect(() => command(together, "OPEN_ROUND")).toThrow("at least two teams");
+      expect(() => command(game, "OPEN_ROUND")).toThrow("At least two participants");
+    });
+
+    it("only changes team escape mode in the lobby", () => {
+      const game = play(settings(joinAll(room()), { teamEscape: true }), { ada: 30, bea: 90, cy: 30 });
+      expect(() => settings(game, { teamEscape: false })).toThrow("only be changed in the lobby");
+      expect(() => settings(game, { escapePoints: 50 })).toThrow("only be changed in the lobby");
+      expect(settings(game, { winPoints: 20 }).run.settingsForNextRound.winPoints).toBe(20);
+    });
+  });
 });

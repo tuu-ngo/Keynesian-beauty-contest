@@ -5,7 +5,7 @@ import type { CSSProperties, ReactNode } from "react";
 import Image from "next/image";
 import { toDataURL } from "qrcode";
 import type { PublicProjection, RevealedRound } from "@/contracts";
-import { decimal, multiplier, ruleSentence, tenths } from "@/lib/formatters";
+import { decimal, multiplier, ruleSentence, teamEscapeNotice, tenths } from "@/lib/formatters";
 import { ConnectionStatus, Countdown, ScreenSkeleton, TeamMark } from "@/components/room/room-ui";
 import { useRoomState } from "@/components/room/use-room-state";
 
@@ -124,7 +124,8 @@ function Reveal({ game }: { game: PublicProjection }) {
   if (!result) return <section className="portal-stage portal-error"><h1>Preparing the result</h1></section>;
   const rows = buildRoundResultRows(game, result);
   const featuredRows = rows.filter((row) => row.pick).slice(0, 5);
-  const hasNotice = Boolean(result.eliminatedUsername || game.escalationReason);
+  const teamNotice = teamEscapeNotice(game, result.escapedTeamIds);
+  const hasNotice = Boolean(result.eliminatedUsername || game.escalationReason || teamNotice);
   return <section className={`portal-stage portal-reveal ${hasNotice ? "portal-reveal--notice" : ""}`}>
     <header className="round-result-header">
       <div><p className="eyeline">Results</p><h1>Round {result.number}</h1></div>
@@ -134,7 +135,7 @@ function Reveal({ game }: { game: PublicProjection }) {
       <DistributionChart result={result} />
       <RoundHighlights rows={featuredRows} total={rows.length} pickCount={result.picks.length} onOpen={() => setDetailsOpen(true)} />
     </div>
-    {hasNotice && <p className="reveal-notice">{game.escalationReason && "Escalation phase. "}{result.eliminatedUsername && `${game.players.find((player) => player.username === result.eliminatedUsername)?.displayName ?? result.eliminatedUsername} was eliminated.`}</p>}
+    {hasNotice && <p className="reveal-notice">{game.escalationReason && "Escalation phase. "}{result.eliminatedUsername && `${game.players.find((player) => player.username === result.eliminatedUsername)?.displayName ?? result.eliminatedUsername} was eliminated.`}{teamNotice}</p>}
     <RoundResultsDialog open={detailsOpen} onClose={() => setDetailsOpen(false)} result={result} rows={rows} />
   </section>;
 }
@@ -159,7 +160,7 @@ function buildRoundResultRows(game: PublicProjection, result: RevealedRound) {
       won,
       points: pick ? result.pointsByUsername[player.username] ?? 0 : null,
       distance: pick && target !== null ? Math.abs(pick.valueTenths / 10 - target) : null,
-      status: won ? "Winner" : eliminated ? "Eliminated" : pick?.defaulted ? "Default pick" : pick ? "Played" : "Did not play",
+      status: won ? "Winner" : eliminated ? "Eliminated" : pick?.defaulted ? "Default pick" : pick ? "Played" : player.status === "ESCAPED" ? "Escaped" : "Did not play",
     };
   }).sort((a, b) => {
     const aOrder = !a.pick ? 3 : a.won ? 0 : a.pick.defaulted ? 2 : 1;
@@ -246,6 +247,7 @@ function Finished({ game }: { game: PublicProjection }) {
       <div><p className="eyeline">Game complete</p><h1>Final leaderboard</h1></div>
       <div className="final-winner"><span>{leaderNames.length === 1 ? "Champion" : "Top result"}</span><strong title={leaderNames.join(", ")}>{winnerLabel}</strong></div>
     </header>
+    {teamEscapeNotice(game) && <p className="reveal-notice">{teamEscapeNotice(game)}</p>}
     <section className="final-leaderboard" aria-labelledby="final-standings-title">
       <header><div><p className="eyeline">Final standings</p><h2 id="final-standings-title">Top players</h2></div><span>{game.players.length} players · {game.revealedRounds.length} rounds</span></header>
       <div className="final-list-head" aria-hidden="true"><span>Place</span><span>Player</span><span>Team</span><span>Points</span></div>

@@ -40,6 +40,8 @@ export interface Run {
   settingsForNextRound: RoundSettings;
   /** Server-only target prepared by the Host for the next HOST_TARGET round. */
   nextHostTargetTenths: number | null;
+  /** Team escape mode score per team id. Missing in runs saved before the mode existed. */
+  teamPoints?: Record<string, number>;
   rounds: InternalRound[];
   createdAt: string;
   finishedAt: string | null;
@@ -152,6 +154,8 @@ export const DEFAULT_ROUND_SETTINGS: RoundSettings = {
   winPoints: 10,
   losePoints: 0,
   startPoints: 100,
+  teamEscape: false,
+  escapePoints: 100,
 };
 
 export class RoomError extends Error {
@@ -249,7 +253,23 @@ export function individualLeaderboard(run: Run): LeaderboardRow[] {
     .map(({ username, points, rank: position }) => ({ username, points, rank: position }));
 }
 
+/** Team escape mode is chosen in the lobby and locked once round 1 opens. */
+export function teamEscapeEnabled(run: Run): boolean {
+  return (run.rounds[0]?.settings ?? run.settingsForNextRound).teamEscape === true;
+}
+
+/** Teams that still have a player in play (not escaped, eliminated or kicked). */
+export function remainingTeamIds(run: Run): string[] {
+  return [...new Set(activeParticipants(run).map((participant) => participant.teamId))];
+}
+
 export function teamLeaderboard(room: Pick<Room, "teams" | "run">): TeamLeaderboardRow[] {
+  if (teamEscapeEnabled(room.run)) {
+    const playing = new Set(Object.values(room.run.participants).map((participant) => participant.teamId));
+    const teamPoints = room.run.teamPoints ?? {};
+    return rank(room.teams.filter((team) => playing.has(team.id)).map((team) => ({ teamId: team.id, points: teamPoints[team.id] ?? 0 })))
+      .map(({ teamId, points: total, rank: position }) => ({ teamId, points: total, rank: position }));
+  }
   const points = new Map(room.teams.map((team) => [team.id, 0]));
   for (const participant of Object.values(room.run.participants)) {
     points.set(participant.teamId, (points.get(participant.teamId) ?? 0) + participant.totalPoints);
@@ -291,6 +311,7 @@ function newRun(number: number, now: number): Run {
     participationLocked: false,
     settingsForNextRound: clone(DEFAULT_ROUND_SETTINGS),
     nextHostTargetTenths: null,
+    teamPoints: {},
     rounds: [],
     createdAt: iso(now),
     finishedAt: null,
@@ -412,6 +433,7 @@ function score(round: InternalRound, run: Run): RoundResult {
       average: null, target: null, winners: [], eliminatedUsername: null, eliminationSeed: null,
       eliminationCandidates: [], pointEliminatedUsernames: [], pointsByUsername: {},
       basePointsByUsername: {}, wagerPointsByUsername: {}, payoutsByUsername: {}, wagerPot: 0, wagerRefunded: false,
+      teamPointsByTeamId: {}, escapedTeamIds: [],
     };
   }
   const sum = entries.reduce((total, [, value]) => total + value, 0);
@@ -506,7 +528,40 @@ function score(round: InternalRound, run: Run): RoundResult {
     payoutsByUsername,
     wagerPot,
     wagerRefunded,
+    teamPointsByTeamId: {},
+    escapedTeamIds: [],
   };
+}
+
+/**
+ * Team escape mode: every team with a winner this round earns winPoints once.
+ * A winning team at or above escapePoints escapes and its players stop playing.
+ * If that would leave no team in play, nobody escapes this round and the
+ * remaining teams play on until one of them wins alone.
+ */
+function applyTeamEscape(run: Run, round: InternalRound): void {
+  const result = round.result!;
+  const winPoints = round.settings.winPoints ?? DEFAULT_ROUND_SETTINGS.winPoints;
+  const escapePoints = round.settings.escapePoints ?? DEFAULT_ROUND_SETTINGS.escapePoints;
+  const teamPoints = (run.teamPoints ??= {});
+  const winningTeams = [...new Set(result.winners.map((username) => run.participants[username]?.teamId).filter((teamId): teamId is string => Boolean(teamId)))];
+  result.teamPointsByTeamId = {};
+  for (const teamId of winningTeams) {
+    teamPoints[teamId] = (teamPoints[teamId] ?? 0) + winPoints;
+    if (winPoints !== 0) result.teamPointsByTeamId[teamId] = winPoints;
+  }
+  const remaining = remainingTeamIds(run);
+  const escaping = winningTeams.filter((teamId) => remaining.includes(teamId) && teamPoints[teamId] >= escapePoints).sort();
+  if (escaping.length === 0 || escaping.length >= remaining.length) {
+    result.escapedTeamIds = [];
+    return;
+  }
+  for (const participant of activeParticipants(run)) {
+    if (!escaping.includes(participant.teamId)) continue;
+    participant.status = "ESCAPED";
+    participant.eliminatedInRound = round.number;
+  }
+  result.escapedTeamIds = escaping;
 }
 
 /** Undo the effects of the current revealed round before allowing the Host to reveal it again. */
@@ -520,6 +575,15 @@ function cancelRoundResult(run: Run): void {
   for (const username of [...result.pointEliminatedUsernames, result.eliminatedUsername].filter((value): value is string => value !== null)) {
     const participant = run.participants[username];
     if (!participant) continue;
+    participant.status = "ACTIVE";
+    participant.eliminatedInRound = null;
+  }
+  for (const [teamId, points] of Object.entries(result.teamPointsByTeamId ?? {})) {
+    if (run.teamPoints) run.teamPoints[teamId] = (run.teamPoints[teamId] ?? 0) - points;
+  }
+  const escapedTeams = new Set(result.escapedTeamIds ?? []);
+  for (const participant of Object.values(run.participants)) {
+    if (participant.status !== "ESCAPED" || participant.eliminatedInRound !== round.number || !escapedTeams.has(participant.teamId)) continue;
     participant.status = "ACTIVE";
     participant.eliminatedInRound = null;
   }
@@ -561,6 +625,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, opti
     case "OPEN_ROUND": {
       if (run.status !== "LOBBY" && run.status !== "ROUND_REVEALED") throw new RoomError("INVALID_TRANSITION");
       if (activeParticipants(run).length < 2) throw new RoomError("INVALID_TRANSITION", "At least two participants are required.");
+      if (teamEscapeEnabled(run) && remainingTeamIds(run).length < 2) throw new RoomError("INVALID_TRANSITION", "Team escape needs players in at least two teams.");
       run.participationLocked = true;
       syncStartPoints(run);
       // Pick receipts only make retries of the open round idempotent. Dropping
@@ -628,9 +693,12 @@ export function applyCommand(room: Room, command: HostCommand, now: number, opti
         }
       }
       round.revealedAt = iso(now);
+      const teamMode = teamEscapeEnabled(run);
+      if (teamMode) applyTeamEscape(run, round);
       // Running out of points is the only way to be eliminated, in both phases
-      // (rooms saved before this setting have it off).
-      if ((round.settings.startPoints ?? 0) > 0) {
+      // (rooms saved before this setting have it off). Team escape mode has no
+      // individual elimination.
+      if (!teamMode && (round.settings.startPoints ?? 0) > 0) {
         for (const participant of activeParticipants(run)) {
           if (participant.totalPoints > 0) continue;
           participant.status = "ELIMINATED";
@@ -638,7 +706,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number, opti
           round.result.pointEliminatedUsernames.push(participant.username);
         }
       }
-      if (activeParticipants(run).length <= 1) {
+      if (teamMode ? remainingTeamIds(run).length <= 1 : activeParticipants(run).length <= 1) {
         run.status = "FINISHED";
         run.finishedAt = iso(now);
         run.finishedBy = "REVEAL";
@@ -689,6 +757,9 @@ export function applyCommand(room: Room, command: HostCommand, now: number, opti
       }
       if (nextMode !== "HOST_TARGET") run.nextHostTargetTenths = null;
       if (nextMode === "HOST_TARGET" && run.nextHostTargetTenths == null) throw new RoomError("VALIDATION_ERROR", "Choose a Host target from 0 to 100.");
+      const changesTeamMode = (settings.teamEscape !== undefined && settings.teamEscape !== (run.settingsForNextRound.teamEscape ?? false))
+        || (settings.escapePoints !== undefined && settings.escapePoints !== (run.settingsForNextRound.escapePoints ?? 100));
+      if (changesTeamMode && run.rounds.length > 0) throw new RoomError("INVALID_TRANSITION", "Team escape mode can only be changed in the lobby.");
       run.settingsForNextRound = { ...run.settingsForNextRound, ...settings };
       if (activeRules !== undefined) run.activeRules = ([1, 2] as const).filter((rule) => activeRules.includes(rule));
       syncStartPoints(run);
