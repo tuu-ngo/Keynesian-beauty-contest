@@ -4,7 +4,7 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 
 ## Sản phẩm
 
-- Một ứng dụng Next.js trên Vercel có đúng **một room** cho toàn bộ ứng dụng. Host tạo room một lần. Room có thể được reset để chơi lại, giữ nguyên mã room và roster; mỗi lần chơi là một `runId` khác nhau.
+- Một ứng dụng Next.js trên Vercel có đúng **một room** cho toàn bộ ứng dụng. Host tạo room một lần. Room có thể được reset để chơi lại, giữ danh sách đội; mỗi lần chơi là một `runId` khác nhau và có room code mới.
 - Host có thể reset bất kỳ lúc nào. Trước khi reset, server lưu bản kết quả của run hiện tại để xem và xuất CSV/JSON trong 7 ngày. Host cũng có thể kết thúc sớm.
 - Không giới hạn số vòng. Host có thể bắt đầu leo thang thủ công sau bất kỳ vòng thường nào đã công bố. Portal phải phân biệt việc chuyển thủ công với thông báo đạt cân bằng Nash.
 - MVP bao gồm Nash, hai quy tắc leo thang, loại người chơi, điểm và bảng xếp hạng cá nhân/đội. Đội thắng là đội có tổng điểm cá nhân cao nhất; điểm của người bị loại vẫn được giữ.
@@ -24,7 +24,7 @@ Tài liệu này ghi các quyết định đã chốt sau khi thảo luận về
 
 ## Quyết định giao diện/contract khi triển khai
 
-- Reset giữ `code` và danh sách đội; xóa vòng, điểm, trạng thái loại, danh sách tham gia, mọi account và phiên của người chơi. Mọi người chơi bị đăng xuất và vào sảnh run mới bằng cách nhập lại tên (có thể dùng lại tên cũ); khi mở vòng đầu tiên, danh sách tham gia mới được khóa lại. Khi run kết thúc (FINISHED), phiên vẫn còn để người chơi xem kết quả cuối; việc kick xảy ra lúc Host mở run mới.
+- Reset tạo room code mới và giữ danh sách đội; xóa vòng, điểm, trạng thái loại, danh sách tham gia, mọi account và phiên của người chơi. Mọi người chơi bị đăng xuất và vào sảnh run mới bằng cách nhập lại tên (có thể dùng lại tên cũ); khi mở vòng đầu tiên, danh sách tham gia mới được khóa lại. Khi run kết thúc (FINISHED), phiên vẫn còn để người chơi xem kết quả cuối; việc kick xảy ra lúc Host mở run mới.
 - Điểm đội là tổng điểm cá nhân, kể cả điểm của người đã bị loại. Nếu bằng điểm, các đội đồng hạng. Người thắng cá nhân cuối cùng trong leo thang là người sống sót cuối; bảng điểm vẫn được hiển thị riêng.
 - Host dùng cookie phiên `HttpOnly` được ký bằng secret môi trường; Player dùng token ngẫu nhiên để khôi phục phiên. Mật khẩu và token không xuất hiện trong projection của Portal.
 

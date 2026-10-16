@@ -94,7 +94,11 @@ export async function putPick(code: string, username: string, args: { runId: str
 export async function commandRoom(code: string, command: HostCommand, now = Date.now()): Promise<{ room: Room; result: CommandResult }> {
   await roomForRead(code, now);
   const result = await getRoomStore().mutateRoom(code, (room) => {
-    const outcome = applyCommand(room, command, now);
+    let newCode: string | undefined;
+    if (command.type === "RESET") {
+      do newCode = roomCode(); while (newCode === room.code);
+    }
+    const outcome = applyCommand(room, command, now, { newCode });
     return { room: outcome.room, value: outcome.result };
   });
   if (!result) throw new Error("ROOM_NOT_FOUND");

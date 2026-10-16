@@ -94,6 +94,8 @@ export interface CommandResult {
   version: number;
   status: RunStatus;
   runId: string;
+  /** Room code after the command; RESET can change it. */
+  code: string;
 }
 
 export interface PickResult {
@@ -549,7 +551,7 @@ function archive(room: Room, reason: "FINISH" | "RESET", now: number): void {
   });
 }
 
-export function applyCommand(room: Room, command: HostCommand, now: number): { room: Room; result: CommandResult; changed: boolean } {
+export function applyCommand(room: Room, command: HostCommand, now: number, options: { newCode?: string } = {}): { room: Room; result: CommandResult; changed: boolean } {
   const existing = ensureVersion(room, command);
   if (existing) return { room, result: existing, changed: false };
   const next = resolveDeadline(clone(room), now);
@@ -728,6 +730,8 @@ export function applyCommand(room: Room, command: HostCommand, now: number): { r
     case "RESET": {
       archive(next, "RESET", now);
       next.run = newRun(run.number + 1, now);
+      // A fresh code per game keeps old tabs, links and QR codes out of the new lobby.
+      if (options.newCode) next.code = options.newCode;
       // Every player of the old game is removed: nicknames are freed and tokens
       // stop working, so everyone joins the new lobby fresh by name. Keeping them
       // made a returning player's own name show as already taken.
@@ -745,7 +749,7 @@ export function applyCommand(room: Room, command: HostCommand, now: number): { r
     next.version += 1;
     next.updatedAt = iso(now);
   }
-  const result = { version: next.version, status: next.run.status, runId: next.run.id };
+  const result = { version: next.version, status: next.run.status, runId: next.run.id, code: next.code };
   next.commandReceipts[command.commandId] = { runId: next.run.id, response: result };
   return { room: next, result, changed };
 }

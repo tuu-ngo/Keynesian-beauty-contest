@@ -870,5 +870,16 @@ describe("room model", () => {
       game = joinAll(game);
       expect(Object.keys(game.run.participants)).toEqual(["ada", "bea", "cy"]);
     });
+
+    it("moves the room to a new code on reset and keeps the old code in the archive", () => {
+      const game = command(command(joinAll(room()), "OPEN_ROUND").room, "FINISH").room;
+      const reset = applyCommand(game, { type: "RESET", commandId: crypto.randomUUID(), expectedVersion: game.version }, NOW, { newCode: "WXYZ" });
+      expect(reset.room.code).toBe("WXYZ");
+      expect(reset.result.code).toBe("WXYZ");
+      expect(reset.room.archives[0].archive.code).toBe("TEST");
+      expect(project(reset.room, "public", NOW).code).toBe("WXYZ");
+      const other = applyCommand(reset.room, { type: "UPDATE_SETTINGS", commandId: crypto.randomUUID(), expectedVersion: reset.room.version, payload: {} }, NOW, { newCode: "QQQQ" });
+      expect(other.room.code).toBe("WXYZ");
+    });
   });
 });

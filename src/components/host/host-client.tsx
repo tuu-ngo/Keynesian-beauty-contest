@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { HostCommand, HostProjection } from "@/contracts";
 import { RoomClientError, roomRequest } from "@/lib/api/room-client";
 import { decimal, shortDate, tenths } from "@/lib/formatters";
@@ -39,6 +40,19 @@ function actionsFor(game: HostProjection): PrimaryCommand[] {
 
 export function HostClient({ code }: { code: string }) {
   const room = useRoomState({ code, view: "host", pauseWhenHidden: false });
+  const router = useRouter();
+  const errorStatus = room.error?.problem.status;
+  // A new run gets a new room code. Any Host tab still on the old code (or a
+  // signed-out one) follows the current room instead of showing an empty page.
+  useEffect(() => {
+    if (errorStatus === 401) { router.replace("/host"); return; }
+    if (errorStatus !== 404) return;
+    let active = true;
+    void roomRequest<{ code: string }>("/api/room")
+      .then((current) => { if (active && current.code !== code) router.replace(`/host/${current.code}`); })
+      .catch(() => { if (active) router.replace("/host"); });
+    return () => { active = false; };
+  }, [code, errorStatus, router]);
   const [notice, setNotice] = useState("");
   const [noticeOk, setNoticeOk] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
@@ -69,8 +83,9 @@ export function HostClient({ code }: { code: string }) {
     const base = { type, commandId: crypto.randomUUID(), expectedVersion: room.data.version };
     const body = type === "UPDATE_SETTINGS" ? { ...base, payload: payload ?? {} } : type === "KICK_PLAYER" ? { ...base, username } : base;
     try {
-      await roomRequest("/api/room/command", { method: "POST", body });
-      if (type === "RESET") { setNotice("A new run has started. Every player was signed out and joins again with a name."); setNoticeOk(true); }
+      const result = await roomRequest<{ code?: string }>("/api/room/command", { method: "POST", body });
+      if (type === "RESET") { setNotice(`A new run has started with room code ${result.code ?? code}. Every player was signed out and joins again with a name.`); setNoticeOk(true); }
+      if (result.code && result.code !== code) { router.replace(`/host/${result.code}`); return; }
       if (type === "KICK_PLAYER") { setNotice(`${kickTarget?.displayName ?? username} was removed from the room.`); setNoticeOk(true); }
       await room.refresh();
     } catch (error) {

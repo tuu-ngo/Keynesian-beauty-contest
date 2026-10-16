@@ -44,6 +44,24 @@ describe("libSQL room store", () => {
     expect((await store.getRoom())?.version).toBe(50);
   });
 
+  it("moves the stored room to a new code when a mutation changes it", async () => {
+    await store.mutateRoom("TEST", (current) => {
+      const next = structuredClone(current);
+      next.version += 1;
+      next.code = "NEWC";
+      return { room: next, value: undefined };
+    });
+    expect(await store.getRoomByCode("TEST")).toBeNull();
+    expect((await store.getRoomByCode("NEWC"))?.code).toBe("NEWC");
+    // Later tests in this file look the room up by its original code.
+    await store.mutateRoom("NEWC", (current) => {
+      const next = structuredClone(current);
+      next.version += 1;
+      next.code = "TEST";
+      return { room: next, value: undefined };
+    });
+  });
+
   it("persists rate-limit buckets and renews them after their window", async () => {
     const now = 1_700_000_000_000;
     await expect(store.consumeRateLimit("login:alice", 2, 60_000, now)).resolves.toBe(true);

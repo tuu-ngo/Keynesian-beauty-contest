@@ -101,8 +101,9 @@ export class LibsqlStore implements RoomStore {
       if (next === current) return outcome;
       if (next.version !== current.version + 1) throw new Error("Room mutator must increment version exactly once.");
       const result = await this.client.execute({
-        sql: "UPDATE room_snapshots SET version = ?, snapshot = ?, updated_at = ? WHERE id = 1 AND code = ? AND version = ?",
-        args: [next.version, JSON.stringify(next), Date.parse(next.updatedAt), code.toUpperCase(), current.version],
+        // RESET gives the room a new code, so the indexed column follows the snapshot.
+        sql: "UPDATE room_snapshots SET code = ?, version = ?, snapshot = ?, updated_at = ? WHERE id = 1 AND code = ? AND version = ?",
+        args: [next.code.toUpperCase(), next.version, JSON.stringify(next), Date.parse(next.updatedAt), code.toUpperCase(), current.version],
       });
       if (result.rowsAffected === 1) return outcome;
       await new Promise<void>((resolve) => setTimeout(resolve, Math.min(2 ** attempt, 32) + Math.floor(Math.random() * 4)));

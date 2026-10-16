@@ -172,7 +172,7 @@ type HostCommand = { commandId: string; expectedVersion: number } & (
 | `START_ESCALATION` | `NORMAL`, sau một vòng `ROUND_REVEALED` | Đặt phase B và bật Rule 1, Rule 2 cho vòng kế; `escalationReason='HOST'`. |
 | `UPDATE_SETTINGS` | `LOBBY` hoặc `ROUND_REVEALED` | Sửa loại vòng, target bí mật (khi dùng), `p`, timer và cấu hình điểm cho vòng kế. Vòng đã mở giữ nguyên settings/target snapshot. |
 | `FINISH` | Room chưa `FINISHED` | Chốt run sớm, tạo bản export/retention. |
-| `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới, xóa vòng/điểm/loại/participant của run; giữ room code và danh sách đội. Mọi account và session bị xóa (người chơi bị đăng xuất, nickname được giải phóng); người chơi vào sảnh run mới bằng cách nhập lại tên. |
+| `RESET` | Bất kỳ trạng thái nào, Host hợp lệ | Lưu run cũ có vòng thành archive, tạo `runId` mới và **room code mới** (khác mã cũ), xóa vòng/điểm/loại/participant của run; giữ danh sách đội. Mã cũ trả `404`; Host tự chuyển sang mã mới, Portal phải mở lại từ Host. Mọi account và session bị xóa (người chơi bị đăng xuất, nickname được giải phóng); người chơi vào sảnh run mới bằng cách nhập lại tên. |
 | `KICK_PLAYER` | Mọi trạng thái trừ `FINISHED` | Xóa participant khỏi run, xóa account (nickname được giải phóng) và mọi session của người đó; pick/stake của vòng chưa công bố bị bỏ. Kết quả các vòng đã công bố giữ nguyên. Username không tồn tại → `400 VALIDATION_ERROR`. |
 
 - Chỉ participant `ACTIVE` được gửi. Client gửi `value` ở bước `0.1`; server từ chối ngoài `0..100`, sai bước, sai vòng hoặc sau deadline/lock, không tự làm tròn. Gửi lại trước lock thay thế lựa chọn cũ. Cùng request id lặp lại là idempotent.
